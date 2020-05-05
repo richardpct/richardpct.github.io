@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Posts on home</title>
+    <link>/post/</link>
+    <description>Recent content in Posts on home</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language>
+    <lastBuildDate>Wed, 07 Aug 2019 15:20:47 +0000</lastBuildDate>
+    
+	<atom:link href="/post/index.xml" rel="self" type="application/rss+xml" />
+    
+    
+    <item>
+      <title>Makefile: Quick Start</title>
+      <link>/post/2019/08/07/makefile-quick-start/</link>
+      <pubDate>Wed, 07 Aug 2019 15:20:47 +0000</pubDate>
+      
+      <guid>/post/2019/08/07/makefile-quick-start/</guid>
+      <description>Introduction I have been working since more than ten years as Linux System Administrator/DevOps Engineer and I have noticed that the Make tool is not widely used for building a project involving the managing of infrastructure such as Docker, Terraform or miscellaneous automation scripts. In some cases, it may be more efficient to use Makefile instead of Bash script.
+What is Make ? Make is a tool that helps to automate some tasks, but what is the benefit of using a Makefile against a shell script ?</description>
+    </item>
+    
+  </channel>
+</rss>
