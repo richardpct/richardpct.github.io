@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/atom-one-light.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with Terraform tutorial 01 | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    <header>
+
+  <nav>
+    <ul>
+      
+      
+      <li class="pull-left ">
+        <a href="/">~/home</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://github.com/richardpct">~/github</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+      </li>
+      
+
+      
+
+    </ul>
+  </nav>
+</header>
+
+  </head>
+
+  <body>
+    <br/>
+
+<div class="article-meta">
+<h1><span class="title">AWS with Terraform tutorial 01</span></h1>
+
+<h2 class="date">2021/02/20</h2>
+<p class="terms">
+  
+  
+  
+  
+  
+</p>
+</div>
+
+
+<div class="content-wrapper">
+  <main>
+    
+
+<h2 id="purpose">Purpose</h2>
+
+<p>I will show you how to build a simple AWS example using Terraform for your
+first steps.<br />
+The example that I have chosen is <a href="https://docs.aws.amazon.com/vpc/latest/userguide/get-started-ipv6.html">the Getting Started with IPv6 for Amazon VPC</a>,
+you will able to create a EC2 instance in AWS which we will spin up a web service.</p>
+
+<p>You will learn how to create:</p>
+
+<ul>
+<li>A S3 bucket</li>
+<li>A VPC</li>
+<li>A public subnet</li>
+<li>A EC2 using an Amazon Linux image</li>
+<li>A Internet Gateway</li>
+<li>A Elastic IP</li>
+<li>A route table</li>
+<li>Some security groups to define firewall rules</li>
+<li>A SSH key for connecting to the EC2</li>
+</ul>
+
+<p>The following figure shows you an overview of what you will build:</p>
+
+<p><img src="https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-01/image01.png"></p>
+
+<p>The default route table contains:</p>
+
+<table>
+<thead>
+<tr>
+<th>Destination</th>
+<th>Target</th>
+</tr>
+</thead>
+
+<tbody>
+<tr>
+<td>10.0.0.0/16</td>
+<td>local</td>
+</tr>
+
+<tr>
+<td>0.0.0.0</td>
+<td>Internet Gateway</td>
+</tr>
+</tbody>
+</table>
+
+<p>The source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto01">Github repository</a>.</p>
+
+<h2 id="requirements">Requirements</h2>
+
+<ul>
+<li>You must create a regular user in the IAM management console with some
+permissions to avoid using the root account</li>
+<li>You must add your AWS credential on your local machine, for example by using
+~/.aws/config and ~/.aws/credentials files so that Terraform is able to make
+requests to the AWS API</li>
+<li>You must install the latest Terraform version (0.14.x)</li>
+</ul>
+
+<h2 id="create-a-s3-bucket">Create a S3 bucket</h2>
+
+<p>Terraform must store the state of our current infrastructure somewhere, you
+could store the state on your local machine but in this case you are the only
+one who can access it. By using a S3 bucket for storing your Terraform state,
+your coworkers can also to access it.<br />
+The first thing to do is to create a S3 bucket on AWS, you should never delete
+it because you will need it as long as you use AWS with Terraform.<br /></p>
+
+<p>You must create a working directory, let&rsquo;s say <code>~/terraform/tuto-01</code>, then
+create a file named <code>00-bucket/main.tf</code> containing:</p>
+
+<h4 id="00-bucket-main-tf">00-bucket/main.tf</h4>
+
+<pre><code>// Setting a provider and a region
+provider &quot;aws&quot; {
+  region = var.region
+}
+
+// Creating a S3 bucket
+resource &quot;aws_s3_bucket&quot; &quot;terraform_state&quot; {
+  bucket = var.bucket
+  acl    = &quot;private&quot;
+
+  versioning {
+    enabled = true
+  }
+
+// Comment the following block if you want to destroy your S3 bucket
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+</code></pre>
+
+<p>The <code>var.region</code> and <code>var.bucket</code> variables hold values that will be defined in
+the next section.</p>
+
+<h4 id="00-bucket-vars-tf">00-bucket/vars.tf</h4>
+
+<p>Here is the definition of the variables that I mentionned in the previous
+section:</p>
+
+<pre><code>variable &quot;region&quot; {
+  type        = string
+  description = &quot;Region&quot;
+}
+
+variable &quot;bucket&quot; {
+  type        = string
+  description = &quot;Bucket&quot;
+}
+</code></pre>
+
+<p>I could set the variables now by using <code>default</code> attribute, but I prefer use
+environment variables in order not to include them on my Github repository
+because datas such as bucket name or SSH keys are sensible.</p>
+
+<h4 id="00-bucket-versions-tf">00-bucket/versions.tf</h4>
+
+<p>I enforce the usage to a specific version of Terraform:</p>
+
+<pre><code>terraform {
+  required_version = &quot;&gt;= 0.14&quot;
+}
+</code></pre>
+
+<h4 id="initialize-the-working-directory">Initialize the working directory</h4>
+
+<p>You shoud have 3 files in your working directory:</p>
+
+<pre><code>├── 00-bucket
+│   ├── main.tf
+│   ├── vars.tf
+│   └── versions.tf
+</code></pre>
+
+<p>You must initialize your working directory in order to retrieve the AWS plugins:</p>
+
+<pre><code>$ terraform init
+</code></pre>
+
+<p>You have now a new .terraform directory created:</p>
+
+<pre><code>├── 00-bucket
+│   ├── .terraform/
+│   ├── main.tf
+│   ├── vars.tf
+│   └── versions.tf
+</code></pre>
+
+<h4 id="deployment">Deployment</h4>
+
+<p>In the <code>vars.tf</code> file we have declared 2 variables: <code>region</code> and <code>bucket</code>.<br />
+Export the following environment variables in order to assign values to the
+variables:</p>
+
+<pre><code>$ export TF_VAR_region=&quot;eu-west-3&quot;
+$ export TF_VAR_bucket=&quot;mybucket-terraform-state&quot;
+</code></pre>
+
+<p>As you can see you must add the prefix <code>TF_VAR_</code> with the variable name so that
+Terraform figures out which variables to use.</p>
+
+<p>Let&rsquo;s create our S3 bucket:</p>
+
+<pre><code>$ terraform apply
+</code></pre>
+
+<p>It will creates a <code>terraform.tfstate</code> file containing the state of our
+infrastructure, you should never delete it!</p>
+
+<pre><code>├── 00-bucket
+│   ├── main.tf
+│   ├── terraform.tfstate
+│   ├── vars.tf
+│   └── versions.tf
+</code></pre>
+
+<p>Notice it is the only time that we store the Terraform state in our local
+machine in order to create the bucket.<br />
+From now on, we will store Terraform states of all our infrastructure stack in
+this bucket.</p>
+
+<h2 id="create-the-network-stack">Create the network stack</h2>
+
+<p>Create a new repository, let&rsquo;s say <code>~/terraform/tuto-01/01-network</code>.</p>
+
+<h4 id="01-network-backends-tf">01-network/backends.tf</h4>
+
+<p>We specify to Terraform that we use a remote backend in order to store our
+states:</p>
+
+<pre><code>terraform {
+  backend &quot;s3&quot; {
+  }
+}
+</code></pre>
+
+<h4 id="01-network-main-tf">01-network/main.tf</h4>
+
+<p>Select our AWS region:</p>
+
+<pre><code>provider &quot;aws&quot; {
+  region = var.region
+}
+</code></pre>
+
+<p>Create our VPC:</p>
+
+<pre><code>resource &quot;aws_vpc&quot; &quot;my_vpc&quot; {
+  cidr_block = var.vpc_cidr_block
+
+  tags = {
+    Name = &quot;my_vpc&quot;
+  }
+}
+</code></pre>
+
+<p>Create a Internet Gateway assiociated to our VPC:</p>
+
+<pre><code>resource &quot;aws_internet_gateway&quot; &quot;my_igw&quot; {
+  vpc_id = aws_vpc.my_vpc.id
+
+  tags = {
+    Name = &quot;my_igw&quot;
+  }
+}
+</code></pre>
+
+<p>Create a subnet in our VPC:</p>
+
+<pre><code>resource &quot;aws_subnet&quot; &quot;public&quot; {
+  vpc_id     = aws_vpc.my_vpc.id
+  cidr_block = var.subnet_public
+
+  tags = {
+    Name = &quot;subnet_public&quot;
+  }
+}
+</code></pre>
+
+<p>Create a default route to the Internet Gateway:</p>
+
+<pre><code>resource &quot;aws_default_route_table&quot; &quot;route&quot; {
+  default_route_table_id = aws_vpc.my_vpc.default_route_table_id
+
+  route {
+    cidr_block = &quot;0.0.0.0/0&quot;
+    gateway_id = aws_internet_gateway.my_igw.id
+  }
+
+  tags = {
+    Name = &quot;default route&quot;
+  }
+}
+</code></pre>
+
+<p>Associate the default route table with our subnet:</p>
+
+<pre><code>resource &quot;aws_route_table_association&quot; &quot;public&quot; {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_default_route_table.route.id
+}
+</code></pre>
+
+<p>Our subnet is public because its default route is the Internet Gateway, that is
+this subnet is able to reach Internet, and outside is able to reach the
+instance inside this subnet.</p>
+
+<h4 id="01-network-vars-tf">01-network/vars.tf</h4>
+
+<p>Declare the variables and define the values:</p>
+
+<pre><code>variable &quot;region&quot; {
+  type        = string
+  description = &quot;Region&quot;
+  default     = &quot;eu-west-3&quot;
+}
+
+variable &quot;vpc_cidr_block&quot; {
+  type        = string
+  description = &quot;VPC cidr block&quot;
+  default     = &quot;10.0.0.0/16&quot;
+}
+
+variable &quot;subnet_public&quot; {
+  type        = string
+  description = &quot;Public subnet&quot;
+  default     = &quot;10.0.0.0/24&quot;
+}
+</code></pre>
+
+<h4 id="01-network-outputs-tf">01-network/outputs.tf</h4>
+
+<p>We need to track some datas on our S3 bucket such as the VPC ID and the Public
+Subnet ID so that they will be used later by the webserver stack, because for
+building the webserver you will need to get the VPC ID and the public subnet ID
+to be able to reference it:</p>
+
+<pre><code>output &quot;vpc_id&quot; {
+  value       = aws_vpc.my_vpc.id
+  description = &quot;VPC ID&quot;
+}
+
+output &quot;subnet_public_id&quot; {
+  value       = aws_subnet.public.id
+  description = &quot;Subnet Public ID&quot;
+}
+</code></pre>
+
+<h4 id="deployment-1">Deployment</h4>
+
+<p>You shoud have these files in your 01-network directory:</p>
+
+<pre><code>├── 01-network
+│   ├── backends.tf
+│   ├── main.tf
+│   ├── outputs.tf
+│   ├── vars.tf
+│   └── versions.tf
+</code></pre>
+
+<p>Export the following variables:</p>
+
+<pre><code>$ export TF_VAR_region=&quot;eu-west-3&quot;
+$ export TF_VAR_bucket=&quot;yourbucket-terraform-state&quot;
+$ export TF_VAR_key_network=&quot;terraform/dev/network/terraform.tfstate&quot;
+</code></pre>
+
+<p>Initialize your working Terraform directory:</p>
+
+<pre><code>$ terraform init \
+      -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+      -backend-config=&quot;key=${TF_VAR_key_network}&quot; \
+      -backend-config=&quot;region=${TF_VAR_region}&quot;
+</code></pre>
+
+<p><code>bucket</code> is the name of the bucket that we have defined earlier, and <code>key</code> is
+where our state will be stored.</p>
+
+<p>Then build your network stack:</p>
+
+<pre><code>$ terraform apply
+</code></pre>
+
+<h2 id="create-the-webserver-stack">Create the WebServer stack</h2>
+
+<p>For this section I will show only the relevant snippet, to see the complete
+code go to my <a href="https://github.com/richardpct/aws-terraform-tuto01">Github repository</a>.
+<br />
+Create a directory named <code>02-webserver</code> in your working directory.<br /></p>
+
+<h4 id="02-webserver-backends-tf">02-webserver/backends.tf</h4>
+
+<p>I declare the remote backend which contains the datas that the network stack has
+exported to our S3 bucket:</p>
+
+<pre><code>data &quot;terraform_remote_state&quot; &quot;network&quot; {
+  backend = &quot;s3&quot;
+
+  config = {
+    bucket = var.bucket
+    key    = var.key_network
+    region = var.region
+  }
+}
+</code></pre>
+
+<p>The following figure explains how some informations can be shared between 2
+distinct stacks using a S3 bucket:</p>
+
+<p><img src="https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-01/image02.png"></p>
+
+<h4 id="02-webserver-main-tf">02-webserver/main.tf</h4>
+
+<p>I define a public SSH key resource in order to copy it to the Linux server:</p>
+
+<pre><code>resource &quot;aws_key_pair&quot; &quot;deployer&quot; {
+  key_name   = &quot;deployer-key&quot;
+  public_key = var.ssh_public_key
+}
+</code></pre>
+
+<p>I declare a Security Group associated with our VPC for the WebServer:</p>
+
+<pre><code>resource &quot;aws_security_group&quot; &quot;webserver&quot; {
+  name   = &quot;sg_webserver&quot;
+  vpc_id = data.terraform_remote_state.network.outputs.vpc_id
+
+  tags = {
+    Name = &quot;webserver sg&quot;
+  }
+}
+</code></pre>
+
+<p>I specify a firewall rule that allows the world to connect to our server via
+SSH (in the real world we should only allow our own IP to connect to our
+instance):</p>
+
+<pre><code>resource &quot;aws_security_group_rule&quot; &quot;inbound_ssh&quot; {
+  type              = &quot;ingress&quot;
+  from_port         = 22
+  to_port           = 22
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = [&quot;0.0.0.0/0&quot;]
+  security_group_id = aws_security_group.webserver.id
+}
+</code></pre>
+
+<p>The following rule allows the world to make HTTP requests to our server:</p>
+
+<pre><code>resource &quot;aws_security_group_rule&quot; &quot;inbound_http&quot; {
+  type              = &quot;ingress&quot;
+  from_port         = 80
+  to_port           = 80
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = [&quot;0.0.0.0/0&quot;]
+  security_group_id = aws_security_group.webserver.id
+}
+</code></pre>
+
+<p>The following rule allows our server to reach Internet, for example to be
+able to update the Linux system:</p>
+
+<pre><code>resource &quot;aws_security_group_rule&quot; &quot;outbound_all&quot; {
+  type              = &quot;egress&quot;
+  from_port         = 0
+  to_port           = 0
+  protocol          = &quot;-1&quot;
+  cidr_blocks       = [&quot;0.0.0.0/0&quot;]
+  security_group_id = aws_security_group.webserver.id
+}
+</code></pre>
+
+<p>We build a server using a Amazon Linux image:</p>
+
+<pre><code>resource &quot;aws_instance&quot; &quot;web&quot; {
+  ami                    = var.image_id
+  instance_type          = var.instance_type
+  key_name               = aws_key_pair.deployer.key_name
+  subnet_id              = data.terraform_remote_state.network.outputs.subnet_public_id
+  vpc_security_group_ids = [aws_security_group.webserver.id]
+
+  tags = {
+    Name = &quot;Web Server&quot;
+  }
+}
+</code></pre>
+
+<p>We create a Elastic IP which is attached to our server so that it can
+communicate with Internet:</p>
+
+<pre><code>resource &quot;aws_eip&quot; &quot;web&quot; {
+  instance = aws_instance.web.id
+  vpc      = true
+}
+</code></pre>
+
+<h4 id="02-webserver-vars-tf">02-webserver/vars.tf</h4>
+
+<p>Define the following variables with the values:</p>
+
+<pre><code>variable &quot;region&quot; {
+  type        = string
+  description = &quot;Region&quot;
+  default     = &quot;eu-west-3&quot;
+}
+
+variable &quot;bucket&quot; {
+  type        = string
+  description = &quot;Bucket&quot;
+}
+
+variable &quot;key_network&quot; {
+  type        = string
+  description = &quot;Network key&quot;
+}
+
+variable &quot;image_id&quot; {
+  type        = string
+  description = &quot;image id&quot;
+  default     = &quot;ami-0ebc281c20e89ba4b&quot; // Amazon Linux 2018
+}
+
+variable &quot;instance_type&quot; {
+  type        = string
+  description = &quot;instance type&quot;
+  default     = &quot;t2.micro&quot;
+}
+
+variable &quot;ssh_public_key&quot; {
+  type        = string
+  description = &quot;ssh public key&quot;
+}
+</code></pre>
+
+<h4 id="02-webserver-outputs-tf">02-webserver/outputs.tf</h4>
+
+<p>Display the Elastic IP associated to our server so that we can connect to it:</p>
+
+<pre><code>output &quot;public_ip&quot; {
+  description = &quot;Public IP&quot;
+  value       = aws_eip.web.public_ip
+}
+</code></pre>
+
+<h4 id="deployment-2">Deployment</h4>
+
+<p>You should have these files in your working directory:</p>
+
+<pre><code>├── 00-bucket
+│   ├── main.tf
+│   ├── terraform.tfstate
+│   ├── vars.tf
+│   └── versions.tf
+├── 01-network
+│   ├── backends.tf
+│   ├── main.tf
+│   ├── outputs.tf
+│   ├── vars.tf
+│   └── versions.tf
+├── 02-webserver
+│   ├── backends.tf
+│   ├── main.tf
+│   ├── outputs.tf
+│   ├── vars.tf
+│   └── versions.tf
+</code></pre>
+
+<p>Export the required environment variable containing your public SSH key:</p>
+
+<pre><code>$ export TF_VAR_ssh_public_key=&quot;ssh-rsa XYZ...&quot;
+</code></pre>
+
+<p>Initialize your working Terraform directory:</p>
+
+<pre><code>$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_key_webserver}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+</code></pre>
+
+<p>Then build the server:</p>
+
+<pre><code>$ terraform apply
+</code></pre>
+
+<h2 id="install-a-web-server-with-nginx">Install a Web Server with Nginx</h2>
+
+<p>The previous command displays on the output the public IP address of our
+webserver, wait a few seconds then connect into it via SSH:</p>
+
+<pre><code>$ ssh ec2-user@xx.xx.xx.xx
+# sudo su -
+# yum update
+# yum install nginx
+</code></pre>
+
+<p>Afterwards open your web browser using the IP address of your webserver.</p>
+
+<h2 id="clean-up">Clean up</h2>
+
+<p>When you have finished to build your infrastructure, you can destroy it:</p>
+
+<pre><code>$ cd ../02-webserver
+$ terraform destroy
+$ cd ../01-network
+$ terraform destroy
+</code></pre>
+
+<p>You don&rsquo;t need to clean up our bucket because we will need it in the next
+tutorials for storing our Terraform states.<br />
+<br />
+You may be wondering why I have decided to split the Terraform code in 3
+sections as I could have written it in the same directory?<br />
+In the case that you have written all your code in the same directory, if you
+want for example modify the type of your instance, you should destroy all your
+infrastructure then rebuild it. In the case when we split the stacks, we only
+destroy then rebuild the webserver stack, the network stack remains unchanged,
+hence we save more times.</p>
+
+<h2 id="summary">Summary</h2>
+
+<p>Congratulation to you if you have succeeded to follow this tutorial!<br />
+As you can see it is not so hard to build a infrastructure using Terraform, in
+the next tutorial I will show you how to organize better your code using the
+modules.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+<script>
+(function() {
+  function center_el(tagName) {
+    var tags = document.getElementsByTagName(tagName), i, tag;
+    for (i = 0; i < tags.length; i++) {
+      tag = tags[i];
+      var parent = tag.parentElement;
+      
+      if (parent.childNodes.length === 1) {
+        
+        if (parent.nodeName === 'A') {
+          parent = parent.parentElement;
+          if (parent.childNodes.length != 1) continue;
+        }
+        if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+      }
+    }
+  }
+  var tagNames = ['img', 'embed', 'object'];
+  for (var i = 0; i < tagNames.length; i++) {
+    center_el(tagNames[i]);
+  }
+})();
+</script>
+
+      
+      <hr/>
+      © 2021 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+  </body>
+</html>
+
