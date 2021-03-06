@@ -6,10 +6,22 @@
     <description>Recent content in Posts on home</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <lastBuildDate>Sat, 20 Feb 2021 15:11:25 +0000</lastBuildDate>
+    <lastBuildDate>Thu, 04 Mar 2021 19:42:41 +0000</lastBuildDate>
     
 	<atom:link href="/post/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>AWS with Terraform tutorial 02</title>
+      <link>/post/2021/03/04/aws-with-terraform-tutorial-02/</link>
+      <pubDate>Thu, 04 Mar 2021 19:42:41 +0000</pubDate>
+      
+      <guid>/post/2021/03/04/aws-with-terraform-tutorial-02/</guid>
+      <description>Purpose This tutorial takes up the previous one in improving our code by using the modules. A module in Terraform acts like a funtion in a programming language, and like a function we can provide some parameters.
+It is a good practice to work with, and you know the famous adage in computer science? &amp;ldquo;Don&amp;rsquo;t repeat yourself!&amp;rdquo;.
+The source code is available on my Github repository.
+Create modules in Terraform Here is the new layout of our Terraform files located in our file system:</description>
+    </item>
     
     <item>
       <title>AWS with Terraform tutorial 01</title>

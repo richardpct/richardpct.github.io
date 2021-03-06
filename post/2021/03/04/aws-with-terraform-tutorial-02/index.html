@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/atom-one-light.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with Terraform tutorial 02 | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    <header>
+
+  <nav>
+    <ul>
+      
+      
+      <li class="pull-left ">
+        <a href="/">~/home</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://github.com/richardpct">~/github</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+      </li>
+      
+
+      
+
+    </ul>
+  </nav>
+</header>
+
+  </head>
+
+  <body>
+    <br/>
+
+<div class="article-meta">
+<h1><span class="title">AWS with Terraform tutorial 02</span></h1>
+
+<h2 class="date">2021/03/04</h2>
+<p class="terms">
+  
+  
+  
+  
+  
+</p>
+</div>
+
+
+<div class="content-wrapper">
+  <main>
+    
+
+<h2 id="purpose">Purpose</h2>
+
+<p>This tutorial takes up the previous one in improving our code by using the
+modules. A module in Terraform acts like a funtion in a programming language,
+and like a function we can provide some parameters.<br />
+It is a good practice to work with, and you know the famous adage in computer
+science? &ldquo;Don&rsquo;t repeat yourself!&rdquo;.<br /></p>
+
+<p>The source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto02">Github repository</a>.</p>
+
+<h2 id="create-modules-in-terraform">Create modules in Terraform</h2>
+
+<p>Here is the new layout of our Terraform files located in our file system:</p>
+
+<pre><code>.
+├── 01-network
+│   ├── backends.tf
+│   ├── main.tf
+│   ├── outputs.tf
+│   └── versions.tf
+├── 02-webserver
+│   ├── backends.tf
+│   ├── main.tf
+│   ├── outputs.tf
+│   ├── vars.tf
+│   └── versions.tf
+└── modules
+    ├── network
+    │   ├── backends.tf
+    │   ├── main.tf
+    │   ├── outputs.tf
+    │   └── vars.tf
+    └── webserver
+        ├── backends.tf
+        ├── main.tf
+        ├── outputs.tf
+        └── vars.tf
+</code></pre>
+
+<p>The modules are located in the modules directory, they are written as a regular
+Terraform code.<br />
+<code>01-network</code> and <code>02-webserver</code> are the modules caller, <code>01-network</code> calling
+the network module with some parameters and <code>02-webserver</code> calling the
+webserver module with some parameters.<br /></p>
+
+<p>Let&rsquo;s see how to call a module with some parameters:</p>
+
+<h4 id="01-network-main-tf">01-network/main.tf</h4>
+
+<pre><code>module &quot;network&quot; {
+  source = &quot;../modules/network&quot;
+
+  region         = &quot;eu-west-3&quot;
+  vpc_cidr_block = &quot;10.0.0.0/16&quot;
+  subnet_public  = &quot;10.0.0.0/24&quot;
+}
+</code></pre>
+
+<h4 id="02-webserver-main-tf">02-webserver/main.tf</h4>
+
+<pre><code>module &quot;webserver&quot; {
+  source = &quot;../modules/webserver&quot;
+
+  region                      = &quot;eu-west-3&quot;
+  network_remote_state_bucket = var.bucket
+  network_remote_state_key    = var.network_key
+  instance_type               = &quot;t2.micro&quot;
+  image_id                    = &quot;ami-0ebc281c20e89ba4b&quot; // Amazon Linux 2018
+  ssh_public_key              = var.ssh_public_key
+}
+</code></pre>
+
+<p>You have just set the <code>source</code> variable with the path of your module, then set
+the values of some variables.</p>
+
+<h2 id="summary">Summary</h2>
+
+<p>The modules are easy to write and use, so use it for avoiding to duplicate your
+code.<br />
+In the next tutorial I will show you how to split your code for deploying your
+infrastructure in multiple environment: (dev, staging, prod &hellip;) using the
+modules.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+<script>
+(function() {
+  function center_el(tagName) {
+    var tags = document.getElementsByTagName(tagName), i, tag;
+    for (i = 0; i < tags.length; i++) {
+      tag = tags[i];
+      var parent = tag.parentElement;
+      
+      if (parent.childNodes.length === 1) {
+        
+        if (parent.nodeName === 'A') {
+          parent = parent.parentElement;
+          if (parent.childNodes.length != 1) continue;
+        }
+        if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+      }
+    }
+  }
+  var tagNames = ['img', 'embed', 'object'];
+  for (var i = 0; i < tagNames.length; i++) {
+    center_el(tagNames[i]);
+  }
+})();
+</script>
+
+      
+      <hr/>
+      © 2021 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+  </body>
+</html>
+
