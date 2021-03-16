@@ -6,10 +6,22 @@
     <description>Recent content in Posts on home</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <lastBuildDate>Thu, 04 Mar 2021 19:42:41 +0000</lastBuildDate>
+    <lastBuildDate>Sat, 06 Mar 2021 19:34:35 +0000</lastBuildDate>
     
 	<atom:link href="/post/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>AWS with Terraform tutorial 03</title>
+      <link>/post/2021/03/06/aws-with-terraform-tutorial-03/</link>
+      <pubDate>Sat, 06 Mar 2021 19:34:35 +0000</pubDate>
+      
+      <guid>/post/2021/03/06/aws-with-terraform-tutorial-03/</guid>
+      <description>Purpose I will introduce you a way to split your infrastructure in distinct environment by leveraging Terraform modules.
+In this tutorial I use the same AWS account to handle multiple environments in order to simplify the exercise, but in the real life you must use a AWS account for each environment for increasing isolation.
+I take up the previous tutorial by adding some improvements:
+ Splitting our infrastructure by environment: Dev and Staging Using user-data for automating Nginx installation Allowing only my IP own address to connect via SSH within the webserver  Here is an overview of the infrastructure you will build in this tutorial:</description>
+    </item>
     
     <item>
       <title>AWS with Terraform tutorial 02</title>
