@@ -6,10 +6,20 @@
     <description>Recent content in Home on home</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <lastBuildDate>Sat, 06 Mar 2021 19:34:35 +0000</lastBuildDate>
+    <lastBuildDate>Tue, 16 Mar 2021 20:24:25 +0000</lastBuildDate>
     
 	<atom:link href="/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>AWS with Terraform tutorial 04</title>
+      <link>/post/2021/03/16/aws-with-terraform-tutorial-04/</link>
+      <pubDate>Tue, 16 Mar 2021 20:24:25 +0000</pubDate>
+      
+      <guid>/post/2021/03/16/aws-with-terraform-tutorial-04/</guid>
+      <description>Purpose I will show you how to build a scenario more complex than the previous one using a public and a private subnet in the same VPC. The scenario takes up this tutorial Scenario 2: VPC with Public and Private Subnets (NAT), here are the components you will build:
+ Creating a VPC with a public and a private subnet Creating a webserver in the public subnet Creating a database server using Redis which stores the count of requests, only the webserver is allowed to connect to the database server using firewall rules called &amp;ldquo;Security Group&amp;rdquo; Creating a NAT gateway with an Elastic IP (EIP) located in the public subnet so that the database which is in the private subnet can reach Internet  Notice: For this exercise I do not use &amp;ldquo;Elastic Cache&amp;rdquo; service provided by AWS, instead I use an EC2 instance where I install Redis.</description>
+    </item>
     
     <item>
       <title>AWS with Terraform tutorial 03</title>
