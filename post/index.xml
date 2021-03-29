@@ -6,10 +6,21 @@
     <description>Recent content in Posts on home</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <lastBuildDate>Tue, 16 Mar 2021 20:24:25 +0000</lastBuildDate>
+    <lastBuildDate>Sat, 27 Mar 2021 20:01:59 +0000</lastBuildDate>
     
 	<atom:link href="/post/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>AWS with Terraform tutorial 05</title>
+      <link>/post/2021/03/27/aws-with-terraform-tutorial-05/</link>
+      <pubDate>Sat, 27 Mar 2021 20:01:59 +0000</pubDate>
+      
+      <guid>/post/2021/03/27/aws-with-terraform-tutorial-05/</guid>
+      <description>Purpose This tutorial takes up the previous one aws-with-terraform-tutorial-04 by adding a bastion server which is the only one that is allowed to connect to the database and the webserver via SSH for improving the security of your infrastructure.
+Here are the components you will build:
+ Creating a VPC with 3 public subnets and a private subnet Creating a bastion server in a public subnet which is the only server that can be reachable from the Internet via SSH, and it is the only that is allowed to connect to the database and the webserver via SSH Creating a web server in a public subnet Creating a database server using Redis which stores the count of requests Creating a NAT gateway with an Elastic IP (EIP) in a public subnet so that the database which is in the private subnet is able to reach Internet  Notice: For the exercise I do not use &amp;ldquo;Elastic Cache&amp;rdquo; service provided by AWS, instead I use an EC2 instance and I install Redis manually.</description>
+    </item>
     
     <item>
       <title>AWS with Terraform tutorial 04</title>

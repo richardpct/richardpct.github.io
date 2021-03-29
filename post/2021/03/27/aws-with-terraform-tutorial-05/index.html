@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/atom-one-light.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with Terraform tutorial 05 | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    <header>
+
+  <nav>
+    <ul>
+      
+      
+      <li class="pull-left ">
+        <a href="/">~/home</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://github.com/richardpct">~/github</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+      </li>
+      
+
+      
+
+    </ul>
+  </nav>
+</header>
+
+  </head>
+
+  <body>
+    <br/>
+
+<div class="article-meta">
+<h1><span class="title">AWS with Terraform tutorial 05</span></h1>
+
+<h2 class="date">2021/03/27</h2>
+<p class="terms">
+  
+  
+  
+  
+  
+</p>
+</div>
+
+
+<div class="content-wrapper">
+  <main>
+    
+
+<h2 id="purpose">Purpose</h2>
+
+<p>This tutorial takes up the previous one
+<a href="https://richardpct.github.io/post/2021/03/16/aws-with-terraform-tutorial-04/">aws-with-terraform-tutorial-04</a>
+by adding a bastion server which is the only one that is allowed to connect to
+the database and the webserver via SSH for improving the security of your
+infrastructure.</p>
+
+<p>Here are the components you will build:</p>
+
+<ul>
+<li>Creating a VPC with 3 public subnets and a private subnet</li>
+<li>Creating a bastion server in a public subnet which is the only server that
+can be reachable from the Internet via SSH, and it is the only that is allowed
+to connect to the database and the webserver via SSH</li>
+<li>Creating a web server in a public subnet</li>
+<li>Creating a database server using Redis which stores the count of requests</li>
+<li>Creating a NAT gateway with an Elastic IP (EIP) in a public subnet so that
+the database which is in the private subnet is able to reach Internet</li>
+</ul>
+
+<p>Notice: For the exercise I do not use &ldquo;Elastic Cache&rdquo; service provided by AWS,
+instead I use an EC2 instance and I install Redis manually.</p>
+
+<p>The following figure depicts the infrastructure you will build:</p>
+
+<p><img src="https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-05/image01.png"></p>
+
+<p>The Terraform code can be found <a href="https://github.com/richardpct/aws-terraform-tuto05">here</a>.</p>
+
+<h2 id="configuring-the-network">Configuring the network</h2>
+
+<h4 id="environments-dev-00-network-main-tf">environments/dev/00-network/main.tf</h4>
+
+<p>I could create a public subnet containing all the services (Nat Gateway, web
+service and bastion) but it&rsquo;s better to isolate each stack for reducing the
+concerns, to do so, I create a first public subnet containing a Nat Gateway, a
+second public subnet containing the bastion and a third public subnet
+containing a web server:</p>
+
+<pre><code>module &quot;network&quot; {
+  source = &quot;../../../modules/network&quot;
+
+  region                = &quot;eu-west-3&quot;
+  env                   = &quot;dev&quot;
+  vpc_cidr_block        = &quot;10.0.0.0/16&quot;
+  subnet_public_nat     = &quot;10.0.0.0/24&quot;
+  subnet_public_bastion = &quot;10.0.1.0/24&quot;
+  subnet_public_web     = &quot;10.0.2.0/24&quot;
+  subnet_private        = &quot;10.0.3.0/24&quot;
+  cidr_allowed_ssh      = var.my_ip_address
+}
+</code></pre>
+
+<p>I will show you only the excerpt code related to the SSH rules, the other rules
+are similar to the previous tutorial. The following rules allow your own IP to
+connect to the bastion, and the bastion is allow to connect to the web server
+and the database:</p>
+
+<pre><code>resource &quot;aws_security_group_rule&quot; &quot;bastion_inbound_ssh&quot; {
+  type              = &quot;ingress&quot;
+  from_port         = local.ssh_port
+  to_port           = local.ssh_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = [var.cidr_allowed_ssh]
+  security_group_id = aws_security_group.bastion.id
+}
+
+resource &quot;aws_security_group_rule&quot; &quot;bastion_outbound_ssh&quot; {
+  type              = &quot;egress&quot;
+  from_port         = local.ssh_port
+  to_port           = local.ssh_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = local.anywhere
+  security_group_id = aws_security_group.bastion.id
+}
+
+resource &quot;aws_security_group_rule&quot; &quot;database_inbound_ssh&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.ssh_port
+  to_port                  = local.ssh_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.bastion.id
+  security_group_id        = aws_security_group.database.id
+}
+
+resource &quot;aws_security_group_rule&quot; &quot;webserver_inbound_ssh&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.ssh_port
+  to_port                  = local.ssh_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.bastion.id
+  security_group_id        = aws_security_group.webserver.id
+}
+</code></pre>
+
+<h2 id="creating-the-bastion">Creating the bastion</h2>
+
+<h4 id="modules-bastion-main-tf">modules/bastion/main.tf</h4>
+
+<p>The bastion is created like a web server, except that we don&rsquo;t install anything:</p>
+
+<pre><code>resource &quot;aws_instance&quot; &quot;bastion&quot; {
+  ami                    = var.image_id
+  user_data              = &lt;&lt;-EOF
+                           #!/bin/bash
+                           exec &gt; &gt;(tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console) 2&gt;&amp;1
+                           sudo yum -y update
+                           sudo yum -y upgrade
+                           EOF
+  instance_type          = var.instance_type
+  key_name               = aws_key_pair.deployer.key_name
+  subnet_id              = data.terraform_remote_state.network.outputs.subnet_public_bastion_id
+  vpc_security_group_ids = [data.terraform_remote_state.network.outputs.sg_bastion_id]
+
+  tags = {
+    Name = &quot;bastion-${var.env}&quot;
+  }
+}
+
+resource &quot;aws_eip&quot; &quot;bastion&quot; {
+  instance = aws_instance.bastion.id
+  vpc      = true
+
+  tags = {
+    Name = &quot;eip_bastion-${var.env}&quot;
+  }
+}
+</code></pre>
+
+<h2 id="deploying-the-infrastructure">Deploying the infrastructure</h2>
+
+<p>Export some environment variables:</p>
+
+<pre><code>$ export TF_VAR_region=&quot;eu-west-3&quot;
+$ export TF_VAR_bucket=&quot;yourbucket-terraform-state&quot;
+$ export TF_VAR_dev_network_key=&quot;terraform/tuto05/dev/network/terraform.tfstate&quot;
+$ export TF_VAR_dev_bastion_key=&quot;terraform/tuto05/dev/bastion/terraform.tfstate&quot;
+$ export TF_VAR_dev_database_key=&quot;terraform/tuto05/dev/database/terraform.tfstate&quot;
+$ export TF_VAR_dev_webserver_key=&quot;terraform/tuto05/dev/webserver/terraform.tfstate&quot;
+$ export TF_VAR_ssh_public_key=&quot;ssh-rsa...&quot;
+$ export TF_VAR_my_ip_address=$(curl -s 'https://duckduckgo.com/?q=ip&amp;t=h_&amp;ia=answer' \
+| sed -e 's/.*Your IP address is \([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\) in.*/\1/')
+</code></pre>
+
+<p>building:</p>
+
+<pre><code>$ cd environments/dev
+$ cd 00-network
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_network_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../01-bastion
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_bastion_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../02-database
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_database_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../03-webserver
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_webserver_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+</code></pre>
+
+<h2 id="testing-your-infrastructure">Testing your infrastructure</h2>
+
+<p>When your infrastructure is built, wait for a while, then issue the following
+command several times for increasing the counter:</p>
+
+<pre><code>$ curl http://ip_public_webserver:8000/cgi-bin/hello.py
+</code></pre>
+
+<p>It should return the count of requests you have performed.</p>
+
+<h2 id="connecting-to-the-database-and-the-web-server-via-ssh">Connecting to the database and the web server via SSH</h2>
+
+<pre><code>$ ssh -J ec2-user@public_ip_bastion ubuntu@private_ip_database
+$ ssh -J ec2-user@public_ip_bastion ec2-user@private_ip_webserver
+</code></pre>
+
+<h2 id="destroying-your-infrastructure">Destroying your infrastructure</h2>
+
+<p>After finishing your test, destroy your infrastructure:</p>
+
+<pre><code>$ cd environments/dev
+$ cd 03-webserver
+$ terraform destroy
+$ cd ../02-database
+$ terraform destroy
+$ cd ../01-bastion
+$ terraform destroy
+$ cd ../00-network
+$ terraform destroy
+</code></pre>
+
+<h2 id="summary">Summary</h2>
+
+<p>We have seen how to improve the security of our infrastructure by using a
+bastion for connecting to the servers.<br />
+In the next tutorial you will learn how to use the high availability feature
+provided by AWS.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+<script>
+(function() {
+  function center_el(tagName) {
+    var tags = document.getElementsByTagName(tagName), i, tag;
+    for (i = 0; i < tags.length; i++) {
+      tag = tags[i];
+      var parent = tag.parentElement;
+      
+      if (parent.childNodes.length === 1) {
+        
+        if (parent.nodeName === 'A') {
+          parent = parent.parentElement;
+          if (parent.childNodes.length != 1) continue;
+        }
+        if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+      }
+    }
+  }
+  var tagNames = ['img', 'embed', 'object'];
+  for (var i = 0; i < tagNames.length; i++) {
+    center_el(tagNames[i]);
+  }
+})();
+</script>
+
+      
+      <hr/>
+      © 2021 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+  </body>
+</html>
+
