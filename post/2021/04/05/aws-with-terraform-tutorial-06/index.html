@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/atom-one-light.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with Terraform tutorial 06 | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    <header>
+
+  <nav>
+    <ul>
+      
+      
+      <li class="pull-left ">
+        <a href="/">~/home</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://github.com/richardpct">~/github</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+      </li>
+      
+
+      
+
+    </ul>
+  </nav>
+</header>
+
+  </head>
+
+  <body>
+    <br/>
+
+<div class="article-meta">
+<h1><span class="title">AWS with Terraform tutorial 06</span></h1>
+
+<h2 class="date">2021/04/05</h2>
+<p class="terms">
+  
+  
+  
+  
+  
+</p>
+</div>
+
+
+<div class="content-wrapper">
+  <main>
+    
+
+<h2 id="purpose">Purpose</h2>
+
+<p>This tutorial takes up the previous one
+<a href="https://richardpct.github.io/post/2021/03/27/aws-with-terraform-tutorial-05/">aws-with-terraform-tutorial-05</a>
+by leveraging the high availability feature provided by AWS.
+Imagine that your bastion or your webserver are crashing for any reasons, they
+will be automatically recreated using autoscaling group, hence your service
+will experience a short downtime.<br />
+For keeping the same EIP (Elastic IP) when a new instance will replace the old
+one, this instance requires to perform an aws command that associates the EIP
+with itself.<br />
+In addition, I no longer use a Redis server using an EC2, instead I will use
+the Elastic Cache service provided by AWS.</p>
+
+<p>The following figure depicts the infrastructure you will build:</p>
+
+<p><img src="https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-06/image01.png"></p>
+
+<p>The source code can be found <a href="https://github.com/richardpct/aws-terraform-tuto06">here</a>.</p>
+
+<h2 id="configuring-the-network">Configuring the network</h2>
+
+<h4 id="environments-dev-00-base-main-tf">environments/dev/00-base/main.tf</h4>
+
+<p>The following code shows how the subnets are configured:</p>
+
+<pre><code>module &quot;base&quot; {
+  source = &quot;../../../modules/base&quot;
+
+  region                  = &quot;eu-west-3&quot;
+  env                     = &quot;dev&quot;
+  vpc_cidr_block          = &quot;10.0.0.0/16&quot;
+  subnet_public_bastion_a = &quot;10.0.0.0/24&quot;
+  subnet_public_bastion_b = &quot;10.0.1.0/24&quot;
+  subnet_public_web_a     = &quot;10.0.2.0/24&quot;
+  subnet_public_web_b     = &quot;10.0.3.0/24&quot;
+  subnet_private_redis_a  = &quot;10.0.4.0/24&quot;
+  subnet_private_redis_b  = &quot;10.0.5.0/24&quot;
+  cidr_allowed_ssh        = var.my_ip_address
+  ssh_public_key          = var.ssh_public_key
+}
+</code></pre>
+
+<p>As you can see later, each service requires to have 2 subnets, one is located in
+the availability zone A and the second is located in the availability zone B.</p>
+
+<h4 id="modules-base-network-tf">modules/base/network.tf</h4>
+
+<p>I declare the 2 subnets in which the bastion will be hosted, and each subnet is
+located in distinct availability zone:</p>
+
+<pre><code>resource &quot;aws_subnet&quot; &quot;public_bastion_a&quot; {
+  vpc_id            = aws_vpc.my_vpc.id
+  cidr_block        = var.subnet_public_bastion_a
+  availability_zone = data.aws_availability_zones.available.names[0]
+
+  tags = {
+    Name = &quot;subnet_public_bastion_a-${var.env}&quot;
+  }
+}
+
+resource &quot;aws_subnet&quot; &quot;public_bastion_b&quot; {
+  vpc_id            = aws_vpc.my_vpc.id
+  cidr_block        = var.subnet_public_bastion_b
+  availability_zone = data.aws_availability_zones.available.names[1]
+
+  tags = {
+    Name = &quot;subnet_public_bastion_b-${var.env}&quot;
+  }
+}
+</code></pre>
+
+<p>The webserver subnets and the redis server subnets are created by the same way.</p>
+
+<h2 id="creating-an-iam-role">Creating an IAM role</h2>
+
+<h4 id="modules-base-iam-tf">modules/base/iam.tf</h4>
+
+<p>When the state of a server is changing to off for any reason, a new public IP
+is associated to the server which will replace it. When using a bastion or a
+web server, it is handy to keep the same public IP, to accomplish it, the EC2
+requires the right to associate the existing EIP by declaring the following IAM
+role:</p>
+
+<pre><code>resource &quot;aws_iam_role&quot; &quot;role&quot; {
+  name = &quot;my_role&quot;
+
+  assume_role_policy = &lt;&lt;EOF
+{
+  &quot;Version&quot;: &quot;2012-10-17&quot;,
+  &quot;Statement&quot;: [
+    {
+      &quot;Action&quot;: &quot;sts:AssumeRole&quot;,
+      &quot;Principal&quot;: {
+        &quot;Service&quot;: &quot;ec2.amazonaws.com&quot;
+      },
+      &quot;Effect&quot;: &quot;Allow&quot;
+    }
+  ]
+}
+EOF
+}
+
+resource &quot;aws_iam_policy&quot; &quot;policy&quot; {
+  name = &quot;my_policy&quot;
+
+  policy = &lt;&lt;EOF
+{
+  &quot;Version&quot;: &quot;2012-10-17&quot;,
+  &quot;Statement&quot;: [
+    {
+      &quot;Effect&quot;: &quot;Allow&quot;,
+      &quot;Action&quot;: [
+        &quot;ec2:AssociateAddress&quot;
+      ],
+      &quot;Resource&quot;: &quot;*&quot;
+    }
+  ]
+}
+EOF
+}
+
+resource &quot;aws_iam_role_policy_attachment&quot; &quot;attach&quot; {
+  role       = aws_iam_role.role.name
+  policy_arn = aws_iam_policy.policy.arn
+}
+
+resource &quot;aws_iam_instance_profile&quot; &quot;profile&quot; {
+  name = &quot;my_profile&quot;
+  role = aws_iam_role.role.name
+}
+</code></pre>
+
+<h2 id="creating-the-bastion">Creating the bastion</h2>
+
+<h4 id="modules-bastion-main-tf">modules/bastion/main.tf</h4>
+
+<p>The following code intends to create a bastion by using autoscaling group to
+ensure to have one server up and running, if it fails or is deleted for any
+reason, a new one is recreated:</p>
+
+<pre><code>data &quot;template_file&quot; &quot;user_data&quot; {
+  template = file(&quot;${path.module}/user-data.sh&quot;)
+
+  vars = {
+    eip_bastion_id = data.terraform_remote_state.base.outputs.aws_eip_bastion_id
+  }
+}
+
+resource &quot;aws_launch_configuration&quot; &quot;bastion&quot; {
+  name                        = &quot;bastion-${var.env}&quot;
+  image_id                    = var.image_id
+  user_data                   = data.template_file.user_data.rendered
+  instance_type               = var.instance_type
+  key_name                    = data.terraform_remote_state.base.outputs.ssh_key
+  security_groups             = [data.terraform_remote_state.base.outputs.sg_bastion_id]
+  iam_instance_profile        = data.terraform_remote_state.base.outputs.iam_instance_profile_name
+  associate_public_ip_address = true
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource &quot;aws_autoscaling_group&quot; &quot;bastion&quot; {
+  name                 = &quot;asg_bastion-${var.env}&quot;
+  launch_configuration = aws_launch_configuration.bastion.id
+  vpc_zone_identifier  = [data.terraform_remote_state.base.outputs.subnet_public_bastion_a_id, data.terraform_remote_state.base.outputs.subnet_public_bastion_b_id]
+  min_size             = 1
+  max_size             = 1
+
+  tag {
+    key                 = &quot;Name&quot;
+    value               = &quot;bastion-${var.env}&quot;
+    propagate_at_launch = true
+  }
+}
+</code></pre>
+
+<p>As you can see, in the last resource I use 2 subnets in distinct AZ, if a AZ is
+experiencing some issues, the server is recreated in the other AZ.</p>
+
+<h4 id="modules-bastion-user-data-sh">modules/bastion/user-data.sh</h4>
+
+<p>The last line intends to associate an existing EIP in order to keep the same
+public IP whenever the instance is recreated:</p>
+
+<pre><code>#!/bin/bash
+
+exec &gt; &gt;(tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console) 2&gt;&amp;1
+sudo yum -y update
+sudo yum -y upgrade
+INSTANCE_ID=&quot;$(curl -s http://169.254.169.254/latest/meta-data/instance-id)&quot;
+aws --region eu-west-3 ec2 associate-address --instance-id $INSTANCE_ID --allocation-id ${eip_bastion_id}
+</code></pre>
+
+<h2 id="creating-the-web-server">Creating the web server</h2>
+
+<p>The build of the web server is similar to the bastion server.</p>
+
+<h2 id="creating-the-redis-server">Creating the Redis server</h2>
+
+<p>Let&rsquo;s create a Redis server for storing the requests count using the Elastic
+Cache service provided by AWS:</p>
+
+<pre><code>resource &quot;aws_elasticache_subnet_group&quot; &quot;redis&quot; {
+  name       = &quot;subnet-redis-${var.env}&quot;
+  subnet_ids = [data.terraform_remote_state.base.outputs.subnet_private_redis_a_id, data.terraform_remote_state.base.outputs.subnet_private_redis_b_id]
+}
+
+resource &quot;aws_elasticache_cluster&quot; &quot;redis&quot; {
+  cluster_id           = &quot;cluster-redis&quot;
+  engine               = &quot;redis&quot;
+  node_type            = var.instance_type
+  num_cache_nodes      = 1
+  parameter_group_name = &quot;default.redis6.x&quot;
+  engine_version       = &quot;6.x&quot;
+  port                 = 6379
+  subnet_group_name    = aws_elasticache_subnet_group.redis.name
+  security_group_ids   = [data.terraform_remote_state.base.outputs.sg_database_id]
+}
+</code></pre>
+
+<h2 id="deploying-the-infrastructure">Deploying the infrastructure</h2>
+
+<p>Export the following environment variables:</p>
+
+<pre><code>$ export TF_VAR_region=&quot;eu-west-3&quot;
+$ export TF_VAR_bucket=&quot;yourbucket-terraform-state&quot;
+$ export TF_VAR_dev_base_key=&quot;terraform/dev/base/terraform.tfstate&quot;
+$ export TF_VAR_dev_bastion_key=&quot;terraform/dev/bastion/terraform.tfstate&quot;
+$ export TF_VAR_dev_database_key=&quot;terraform/dev/database/terraform.tfstate&quot;
+$ export TF_VAR_dev_webserver_key=&quot;terraform/dev/webserver/terraform.tfstate&quot;
+$ export TF_VAR_ssh_public_key=&quot;ssh-rsa XXX...&quot;
+$ export TF_VAR_my_ip_address=$(curl -s 'https://duckduckgo.com/?q=ip&amp;t=h_&amp;ia=answer' \
+| sed -e 's/.*Your IP address is \([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\) in.*/\1/')
+</code></pre>
+
+<p>Building:</p>
+
+<pre><code>$ cd environments/dev
+$ cd 00-network
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_network_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../01-bastion
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_bastion_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../02-database
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_database_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../03-webserver
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_webserver_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+</code></pre>
+
+<p>You need to perform <code>terraform init</code> once.</p>
+
+<h2 id="testing-your-infrastructure">Testing your infrastructure</h2>
+
+<p>When your infrastructure is built, get the EIP of your web server by performing
+the following command:</p>
+
+<pre><code>$ aws ec2 describe-addresses --filters &quot;Name=tag:Name,Values=eip_web-dev&quot; \
+  --query 'Addresses[*].PublicIp' \
+  --output text
+</code></pre>
+
+<p>Perform the following command until the output matches the EIP of your web
+server:</p>
+
+<pre><code>$ aws ec2 describe-instances --filters &quot;Name=tag-value,Values=webserver-dev&quot; \
+  --query 'Reservations[*].Instances[*].NetworkInterfaces[*].PrivateIpAddresses[*].Association.PublicIp' \
+  --output text
+</code></pre>
+
+<p>Then issue the following command several times for increasing the counter:</p>
+
+<pre><code>$ curl http://ip_public_webserver:8000/cgi-bin/hello.py
+</code></pre>
+
+<p>It should return the count of requests you have performed.</p>
+
+<h2 id="testing-the-high-availability">Testing the High Availability</h2>
+
+<p>Get the instance ID of your web server:</p>
+
+<pre><code>$ aws ec2 describe-instances --filters &quot;Name=tag-value,Values=webserver-dev&quot; &quot;Name=instance-state-name,Values=running&quot; \
+  --query &quot;Reservations[*].Instances[*].InstanceId&quot; \
+  --output text
+</code></pre>
+
+<p>Terminate your instance using its ID:</p>
+
+<pre><code>$ aws ec2 terminate-instances --instance-ids id-instance_web_server
+</code></pre>
+
+<p>Then wait until the following command returns the ID instance of your new web
+server:</p>
+
+<pre><code>$ aws ec2 describe-instances --filters &quot;Name=tag-value,Values=webserver-dev&quot; &quot;Name=instance-state-name,Values=running&quot; \
+  --query &quot;Reservations[*].Instances[*].InstanceId&quot; \
+  --output text
+</code></pre>
+
+<h2 id="destroying-your-infrastructure">Destroying your infrastructure</h2>
+
+<p>After finishing your test, destroy your infrastructure:</p>
+
+<pre><code>$ cd environments/dev
+$ cd 03-webserver
+$ terraform destroy
+$ cd ../02-database
+$ terraform destroy
+$ cd ../01-bastion
+$ terraform destroy
+$ cd ../00-network
+$ terraform destroy
+</code></pre>
+
+<h2 id="summary">Summary</h2>
+
+<p>In this tutorial you have learned how to use the auto scaling group in order
+to ensure one server is up and running, but the downside of this way is
+whenever your server is recreated, your service is experiencing a short
+downtime.<br />
+In the next tutorial I will show you how to improve the method using a load
+balancer.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+<script>
+(function() {
+  function center_el(tagName) {
+    var tags = document.getElementsByTagName(tagName), i, tag;
+    for (i = 0; i < tags.length; i++) {
+      tag = tags[i];
+      var parent = tag.parentElement;
+      
+      if (parent.childNodes.length === 1) {
+        
+        if (parent.nodeName === 'A') {
+          parent = parent.parentElement;
+          if (parent.childNodes.length != 1) continue;
+        }
+        if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+      }
+    }
+  }
+  var tagNames = ['img', 'embed', 'object'];
+  for (var i = 0; i < tagNames.length; i++) {
+    center_el(tagNames[i]);
+  }
+})();
+</script>
+
+      
+      <hr/>
+      © 2021 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+  </body>
+</html>
+
