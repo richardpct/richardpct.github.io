@@ -3,17 +3,22 @@
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   
   <url>
-    <loc>/post/2021/04/05/aws-with-terraform-tutorial-06/</loc>
-    <lastmod>2021-04-05T18:33:40+00:00</lastmod>
+    <loc>/post/2021/04/17/aws-with-terraform-tutorial-07/</loc>
+    <lastmod>2021-04-17T18:17:44+00:00</lastmod>
   </url>
   
   <url>
     <loc>/</loc>
-    <lastmod>2021-04-05T18:33:40+00:00</lastmod>
+    <lastmod>2021-04-17T18:17:44+00:00</lastmod>
   </url>
   
   <url>
     <loc>/post/</loc>
+    <lastmod>2021-04-17T18:17:44+00:00</lastmod>
+  </url>
+  
+  <url>
+    <loc>/post/2021/04/05/aws-with-terraform-tutorial-06/</loc>
     <lastmod>2021-04-05T18:33:40+00:00</lastmod>
   </url>
   

@@ -6,10 +6,22 @@
     <description>Recent content in Posts on home</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <lastBuildDate>Mon, 05 Apr 2021 18:33:40 +0000</lastBuildDate>
+    <lastBuildDate>Sat, 17 Apr 2021 18:17:44 +0000</lastBuildDate>
     
 	<atom:link href="/post/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>AWS with Terraform tutorial 07</title>
+      <link>/post/2021/04/17/aws-with-terraform-tutorial-07/</link>
+      <pubDate>Sat, 17 Apr 2021 18:17:44 +0000</pubDate>
+      
+      <guid>/post/2021/04/17/aws-with-terraform-tutorial-07/</guid>
+      <description>Purpose This tutorial takes up the previous one aws-terraform-tuto06 by adding an ALB (Application Load Balancer) in front of the 2 web servers for sharing the load between 2 web servers and having a short downtime when a web server is failing.
+The following figure depicts the infrastructure you will build:
+The source code can be found here.
+Configuring the network environments/dev/00-base/main.tf The following code shows how the subnets are configured:</description>
+    </item>
     
     <item>
       <title>AWS with Terraform tutorial 06</title>
