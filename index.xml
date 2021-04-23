@@ -6,10 +6,22 @@
     <description>Recent content in Home on home</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <lastBuildDate>Sat, 17 Apr 2021 18:17:44 +0000</lastBuildDate>
+    <lastBuildDate>Fri, 23 Apr 2021 18:55:17 +0000</lastBuildDate>
     
 	<atom:link href="/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>AWS with Terraform tutorial 08</title>
+      <link>/post/2021/04/23/aws-with-terraform-tutorial-08/</link>
+      <pubDate>Fri, 23 Apr 2021 18:55:17 +0000</pubDate>
+      
+      <guid>/post/2021/04/23/aws-with-terraform-tutorial-08/</guid>
+      <description>Purpose This tutorial takes up the previous one aws-terraform-tuto07 by adding autoscaling policy in order to scale our web server according to a metric that you chose, for our example I chose to add a web server if the CPU Load is higher than a threshold that I have defined.
+The following figure depicts the infrastructure you will build:
+The source code can be found here.
+Configuring the autoscaling policy modules/webserver/main.</description>
+    </item>
     
     <item>
       <title>AWS with Terraform tutorial 07</title>

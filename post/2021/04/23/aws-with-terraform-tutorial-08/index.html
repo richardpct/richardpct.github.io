@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/atom-one-light.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with Terraform tutorial 08 | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    <header>
+
+  <nav>
+    <ul>
+      
+      
+      <li class="pull-left ">
+        <a href="/">~/home</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://github.com/richardpct">~/github</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+      </li>
+      
+
+      
+
+    </ul>
+  </nav>
+</header>
+
+  </head>
+
+  <body>
+    <br/>
+
+<div class="article-meta">
+<h1><span class="title">AWS with Terraform tutorial 08</span></h1>
+
+<h2 class="date">2021/04/23</h2>
+<p class="terms">
+  
+  
+  
+  
+  
+</p>
+</div>
+
+
+<div class="content-wrapper">
+  <main>
+    
+
+<h2 id="purpose">Purpose</h2>
+
+<p>This tutorial takes up the previous one
+<a href="https://richardpct.github.io/post/2021/04/17/aws-with-terraform-tutorial-07/">aws-terraform-tuto07</a>
+by adding autoscaling policy in order to scale our web server according to a
+metric that you chose, for our example I chose to add a web server if the CPU
+Load is higher than a threshold that I have defined.</p>
+
+<p>The following figure depicts the infrastructure you will build:</p>
+
+<p><img src="https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-08/image01.png"></p>
+
+<p>The source code can be found <a href="https://github.com/richardpct/aws-terraform-tuto08">here</a>.</p>
+
+<h2 id="configuring-the-autoscaling-policy">Configuring the autoscaling policy</h2>
+
+<h4 id="modules-webserver-main-tf">modules/webserver/main.tf</h4>
+
+<p>I only show the relevant excerpt on how to configure the autoscaling policy:</p>
+
+<pre><code>resource &quot;aws_autoscaling_group&quot; &quot;web&quot; {
+  name                 = &quot;asg_web-${var.env}&quot;
+  launch_configuration = aws_launch_configuration.web.id
+  vpc_zone_identifier  = [data.terraform_remote_state.base.outputs.subnet_private_web_a_id, data.terraform_remote_state.base.outputs.subnet_private_web_b_id]
+  target_group_arns    = [data.terraform_remote_state.base.outputs.alb_target_group_web_arn]
+  health_check_type    = &quot;ELB&quot;
+
+  min_size             = 2
+  max_size             = 3
+
+  tag {
+    key                 = &quot;Name&quot;
+    value               = &quot;webserver-${var.env}&quot;
+    propagate_at_launch = true
+  }
+}
+
+resource &quot;aws_autoscaling_policy&quot; &quot;web&quot; {
+  name                   = &quot;autoscaling_policy_web-${var.env}&quot;
+  policy_type            = &quot;TargetTrackingScaling&quot;
+  autoscaling_group_name = aws_autoscaling_group.web.name
+
+  target_tracking_configuration {
+    predefined_metric_specification {
+      predefined_metric_type = &quot;ASGAverageCPUUtilization&quot;
+    }
+
+    target_value = 40.0
+  }
+}
+</code></pre>
+
+<p><code>min_size = 2</code> intends to have at least 2 web servers up and running, and
+<code>max_size = 3</code> intends to have at maximum 3 web servers in any case.<br />
+<code>predefined_metric_type = &quot;ASGAverageCPUUtilization&quot;</code> intends to use the
+CPU Load Metric for scaling the web servers.<br />
+<code>target_value = 40.0</code> intends to scale up when the average CPU Load of all our
+web server is higher than 40% and when the average is lower than 40% the
+autoscaling will scale down the service.</p>
+
+<h2 id="deploying-the-infrastructure">Deploying the infrastructure</h2>
+
+<p>Export the following environment variables:</p>
+
+<pre><code>$ export TF_VAR_region=&quot;eu-west-3&quot;
+$ export TF_VAR_bucket=&quot;yourbucket-terraform-state&quot;
+$ export TF_VAR_dev_base_key=&quot;terraform/dev/base/terraform.tfstate&quot;
+$ export TF_VAR_dev_bastion_key=&quot;terraform/dev/bastion/terraform.tfstate&quot;
+$ export TF_VAR_dev_database_key=&quot;terraform/dev/database/terraform.tfstate&quot;
+$ export TF_VAR_dev_webserver_key=&quot;terraform/dev/webserver/terraform.tfstate&quot;
+$ export TF_VAR_ssh_public_key=&quot;ssh-rsa XXX...&quot;
+$ export TF_VAR_my_ip_address=$(curl -s 'https://duckduckgo.com/?q=ip&amp;t=h_&amp;ia=answer' \
+| sed -e 's/.*Your IP address is \([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\) in.*/\1/')
+</code></pre>
+
+<p>Building:</p>
+
+<pre><code>$ cd environments/dev
+$ cd 00-network
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_network_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../01-bastion
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_bastion_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../02-database
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_database_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../03-webserver
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_webserver_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+</code></pre>
+
+<p>You need to perform <code>terraform init</code> once.</p>
+
+<h2 id="testing-your-infrastructure">Testing your infrastructure</h2>
+
+<p>When your infrastructure is built, get the DNS name of your Load Balancer by
+performing the following command:</p>
+
+<pre><code>$ aws elbv2 describe-load-balancers --names alb-web-dev \
+    --query 'LoadBalancers[*].DNSName' \
+    --output text
+</code></pre>
+
+<p>Get the ARN of your Load Balancer:</p>
+
+<pre><code>$ aws elbv2 describe-load-balancers --names alb-web-dev \
+    --query 'LoadBalancers[*].LoadBalancerArn' \
+    --output text
+</code></pre>
+
+<p>Get the ARN of your Target Groups by providing the Load Balancer ARN:</p>
+
+<pre><code>$ aws elbv2 describe-target-groups \
+    --load-balancer-arn arn:aws:elasticloadbalancing:eu-west-3:xxxxxxxxxxxx:loadbalancer/app/alb-web-dev/xxxxxxxxxxxxxxxx \
+    --query 'TargetGroups[*].TargetGroupArn' \
+    --output text
+</code></pre>
+
+<p>Perform the following command by providing the Target Group ARN until you have
+2 healthy instances:</p>
+
+<pre><code>$ aws elbv2 describe-target-health \
+    --target-group-arn arn:aws:elasticloadbalancing:eu-west-3:xxxxxxxxxxxx:targetgroup/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+</code></pre>
+
+<p>Then issue the following command several times for increasing the counter:</p>
+
+<pre><code>$ curl http://ARN_load_balancer:8000/cgi-bin/hello.py
+</code></pre>
+
+<p>It should return the count of requests you have performed.</p>
+
+<h2 id="testing-the-automation-of-autoscaling">Testing the automation of autoscaling</h2>
+
+<p>Chose one of the 2 running instances and connect to it, then install a package
+stress in order to burn the CPU:</p>
+
+<pre><code>$ ssh -J ec2-user@IP_public_bastion ec2-user@IP_private_instance
+$ sudo su -
+# yum install stress
+# stress --cpu 1
+</code></pre>
+
+<p>Wait for a while, then a third web server will be created and the Load Balancer
+will register it, you now have three healthy instances:</p>
+
+<pre><code>$ aws elbv2 describe-target-health \
+    --target-group-arn arn:aws:elasticloadbalancing:eu-west-3:xxxxxxxxxxxx:targetgroup/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+</code></pre>
+
+<p>If you make some requests to the service, you will notice that the three
+servers will serve your requests in turn:</p>
+
+<pre><code>$ curl http://ARN_load_balancer/cgi-bin/hello.py
+</code></pre>
+
+<p>For testing the scale down when there is no longer high load, just stop the
+stress process by pressing <code>CTRL-C</code> in your terminal, then a web server will be
+terminated and you have now 2 web servers up and running.</p>
+
+<h2 id="destroying-your-infrastructure">Destroying your infrastructure</h2>
+
+<p>After finishing your test, destroy your infrastructure:</p>
+
+<pre><code>$ cd environments/dev
+$ cd 03-webserver
+$ terraform destroy
+$ cd ../02-database
+$ terraform destroy
+$ cd ../01-bastion
+$ terraform destroy
+$ cd ../00-network
+$ terraform destroy
+</code></pre>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+<script>
+(function() {
+  function center_el(tagName) {
+    var tags = document.getElementsByTagName(tagName), i, tag;
+    for (i = 0; i < tags.length; i++) {
+      tag = tags[i];
+      var parent = tag.parentElement;
+      
+      if (parent.childNodes.length === 1) {
+        
+        if (parent.nodeName === 'A') {
+          parent = parent.parentElement;
+          if (parent.childNodes.length != 1) continue;
+        }
+        if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+      }
+    }
+  }
+  var tagNames = ['img', 'embed', 'object'];
+  for (var i = 0; i < tagNames.length; i++) {
+    center_el(tagNames[i]);
+  }
+})();
+</script>
+
+      
+      <hr/>
+      © 2021 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+  </body>
+</html>
+
