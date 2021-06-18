@@ -6,10 +6,21 @@
     <description>Recent content in Home on home</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <lastBuildDate>Fri, 23 Apr 2021 18:55:17 +0000</lastBuildDate>
+    <lastBuildDate>Thu, 03 Jun 2021 19:24:14 +0000</lastBuildDate>
     
 	<atom:link href="/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>AWS with Terraform tutorial Gitlab</title>
+      <link>/post/2021/06/03/aws-with-terraform-tutorial-gitlab/</link>
+      <pubDate>Thu, 03 Jun 2021 19:24:14 +0000</pubDate>
+      
+      <guid>/post/2021/06/03/aws-with-terraform-tutorial-gitlab/</guid>
+      <description>Table of Contents  Purpose Configuring the network Creating the EFS Configuring the firewall rules Building the bastion Building the databases Building the Load Balancers Building the Gitlab servers Building the Gitlab Runners Deploying the Gitlab infrastructure Destroying your infrastructure Summary  
+Purpose This tutorial is intended to show you how to build Gitlab on AWS automated with Terraform, the source code can be found here.
+The following figure depicts the infrastructure that you will build:</description>
+    </item>
     
     <item>
       <title>AWS with Terraform tutorial 08</title>

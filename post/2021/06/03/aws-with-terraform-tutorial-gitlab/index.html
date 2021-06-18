@@ -1,0 +1,1205 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/atom-one-light.min.css">
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with Terraform tutorial Gitlab | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    <header>
+
+  <nav>
+    <ul>
+      
+      
+      <li class="pull-left ">
+        <a href="/">~/home</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://github.com/richardpct">~/github</a>
+      </li>
+      
+      
+      <li class="pull-left ">
+        <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+      </li>
+      
+
+      
+
+    </ul>
+  </nav>
+</header>
+
+  </head>
+
+  <body>
+    <br/>
+
+<div class="article-meta">
+<h1><span class="title">AWS with Terraform tutorial Gitlab</span></h1>
+
+<h2 class="date">2021/06/03</h2>
+<p class="terms">
+  
+  
+  
+  
+  
+</p>
+</div>
+
+
+<div class="content-wrapper">
+  <main>
+    
+
+<h2 id="table-of-contents">Table of Contents</h2>
+
+<ol>
+<li><a href="#Purpose">Purpose</a></li>
+<li><a href="#Configuring the network">Configuring the network</a></li>
+<li><a href="#Creating the EFS">Creating the EFS</a></li>
+<li><a href="#Configuring the firewall rules">Configuring the firewall rules</a></li>
+<li><a href="#Building the bastion">Building the bastion</a></li>
+<li><a href="#Building the databases">Building the databases</a></li>
+<li><a href="#Building the Load Balancers">Building the Load Balancers</a></li>
+<li><a href="#Building the Gitlab servers">Building the Gitlab servers</a></li>
+<li><a href="#Building the Gitlab Runners">Building the Gitlab Runners</a></li>
+<li><a href="#Deploying the Gitlab infrastructure">Deploying the Gitlab infrastructure</a></li>
+<li><a href="#Destroying your infrastructure">Destroying your infrastructure</a></li>
+<li><a href="#Summary">Summary</a></li>
+</ol>
+
+<p><a name="Purpose"></a></p>
+
+<h2 id="purpose">Purpose</h2>
+
+<p>This tutorial is intended to show you how to build Gitlab on AWS automated with
+Terraform, the source code can be found <a href="https://github.com/richardpct/aws-terraform-gitlab">here</a>.</p>
+
+<p>The following figure depicts the infrastructure that you will build:</p>
+
+<p><img src="https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-gitlab/image01.png"></p>
+
+<p>Gitlab is one of the most used Git repository manager in Open Source, in
+addition you may use the CI/CD feature called <code>Runners</code>.<br />
+For building the Gitlab infrastructure I have followed the official Gitlab
+installation that you can found <a href="https://docs.gitlab.com/ee/install/aws/">here</a>,
+except I don&rsquo;t use a separate Gitaly service for managing the Git repositories,
+instead of this I prefer use a shared NFS because I think it is a good
+trade-off between maintenance and cost.</p>
+
+<p><a name="Configuring the network"></a></p>
+
+<h2 id="configuring-the-network">Configuring the network</h2>
+
+<h4 id="environments-dev-00-base-main-tf">environments/dev/00-base/main.tf</h4>
+
+<p>The following code shows how the network is split into subnets:</p>
+
+<pre><code>module &quot;base&quot; {
+  source = &quot;../../../modules/base&quot;
+
+  region                  = &quot;eu-west-3&quot;
+  env                     = &quot;dev&quot;
+  vpc_cidr_block          = &quot;10.0.0.0/16&quot;
+  subnet_public_a         = &quot;10.0.0.0/24&quot;
+  subnet_public_b         = &quot;10.0.1.0/24&quot;
+  subnet_private_gitlab_a = &quot;10.0.2.0/24&quot;
+  subnet_private_gitlab_b = &quot;10.0.3.0/24&quot;
+  subnet_private_a        = &quot;10.0.4.0/24&quot;
+  subnet_private_b        = &quot;10.0.5.0/24&quot;
+  cidr_allowed_ssh        = var.my_ip_address
+  ssh_public_key          = var.ssh_public_key
+}
+</code></pre>
+
+<p>The subnets are organized as follows:</p>
+
+<ul>
+<li>Public subnet:
+
+<ul>
+<li>The bastion server is the one that allows you to connect via ssh to the
+Gitlab server and Runner</li>
+<li>The NAT Gateway allows the services included in the private subnet
+(Gitlab and Runner) to access the Internet</li>
+<li>The public Load Balancer will forward the client requests to the Gitlab
+server</li>
+</ul></li>
+<li>Private Gitlab subnet (with access to Internet):
+
+<ul>
+<li>The Gitlab servers and the Runners need to reach the Internet in order to
+fetch and upgrade packages</li>
+</ul></li>
+<li>Private subnet (No access to Internet):
+
+<ul>
+<li>The PostgreSQL and Redis databases</li>
+<li>The internal Load Balancer allows the runner to reach the Gitlab server</li>
+<li>The EFS stores all Gitlab datas</li>
+</ul></li>
+</ul>
+
+<h4 id="modules-base-network-tf">modules/base/network.tf</h4>
+
+<ul>
+<li><p>Creating the VPC and the Internet Gateway:</p>
+
+<pre><code>resource &quot;aws_vpc&quot; &quot;my_vpc&quot; {
+cidr_block           = var.vpc_cidr_block
+enable_dns_hostnames = true
+
+tags = {
+Name = &quot;my_vpc-${var.env}&quot;
+}
+}
+
+resource &quot;aws_internet_gateway&quot; &quot;my_igw&quot; {
+vpc_id = aws_vpc.my_vpc.id
+
+tags = {
+Name = &quot;my_igw-${var.env}&quot;
+}
+}
+</code></pre></li>
+</ul>
+
+<p>I remind you that the Internet Gateway is used so that the Internet can reach
+any private subnet associated with this Gateway.</p>
+
+<ul>
+<li><p>Creating all subnets:</p>
+
+<pre><code>resource &quot;aws_subnet&quot; &quot;public_a&quot; {
+vpc_id            = aws_vpc.my_vpc.id
+cidr_block        = var.subnet_public_a
+availability_zone = data.aws_availability_zones.available.names[0]
+
+tags = {
+Name = &quot;subnet_public_a-${var.env}&quot;
+}
+}
+
+resource &quot;aws_subnet&quot; &quot;public_b&quot; {
+vpc_id            = aws_vpc.my_vpc.id
+cidr_block        = var.subnet_public_b
+availability_zone = data.aws_availability_zones.available.names[1]
+
+tags = {
+Name = &quot;subnet_public_b-${var.env}&quot;
+}
+}
+
+resource &quot;aws_subnet&quot; &quot;private_gitlab_a&quot; {
+vpc_id            = aws_vpc.my_vpc.id
+cidr_block        = var.subnet_private_gitlab_a
+availability_zone = data.aws_availability_zones.available.names[0]
+
+tags = {
+Name = &quot;subnet_private_gitlab_a-${var.env}&quot;
+}
+}
+
+resource &quot;aws_subnet&quot; &quot;private_gitlab_b&quot; {
+vpc_id            = aws_vpc.my_vpc.id
+cidr_block        = var.subnet_private_gitlab_b
+availability_zone = data.aws_availability_zones.available.names[1]
+
+tags = {
+Name = &quot;subnet_private_gitlab_b-${var.env}&quot;
+}
+}
+
+resource &quot;aws_subnet&quot; &quot;private_a&quot; {
+vpc_id            = aws_vpc.my_vpc.id
+cidr_block        = var.subnet_private_a
+availability_zone = data.aws_availability_zones.available.names[0]
+
+tags = {
+Name = &quot;subnet_private_a-${var.env}&quot;
+}
+}
+
+resource &quot;aws_subnet&quot; &quot;private_b&quot; {
+vpc_id            = aws_vpc.my_vpc.id
+cidr_block        = var.subnet_private_b
+availability_zone = data.aws_availability_zones.available.names[1]
+
+tags = {
+Name = &quot;subnet_private_b-${var.env}&quot;
+}
+}
+</code></pre></li>
+</ul>
+
+<p>As you can see, all subnets are created into 2 availability zones, thus if an
+outage occurs in a entire data center, the entire service will run into the
+other availability zone.</p>
+
+<ul>
+<li><p>Creating the NAT Gateway:</p>
+
+<pre><code>resource &quot;aws_eip&quot; &quot;nat_a&quot; {
+vpc = true
+
+tags = {
+Name = &quot;eip_nat_a-${var.env}&quot;
+}
+}
+
+resource &quot;aws_eip&quot; &quot;nat_b&quot; {
+vpc = true
+
+tags = {
+Name = &quot;eip_nat_b-${var.env}&quot;
+}
+}
+
+resource &quot;aws_nat_gateway&quot; &quot;nat_gw_a&quot; {
+allocation_id = aws_eip.nat_a.id
+subnet_id     = aws_subnet.public_a.id
+
+tags = {
+Name = &quot;nat_gw_a-${var.env}&quot;
+}
+}
+
+resource &quot;aws_nat_gateway&quot; &quot;nat_gw_b&quot; {
+allocation_id = aws_eip.nat_b.id
+subnet_id     = aws_subnet.public_b.id
+
+tags = {
+Name = &quot;nat_gw_b-${var.env}&quot;
+}
+}
+</code></pre></li>
+</ul>
+
+<p>I remind you that the Nat Gateway is used so that the public subnet can reach
+the Internet.</p>
+
+<ul>
+<li><p>Creating the route tables:</p>
+
+<pre><code>resource &quot;aws_route_table&quot; &quot;route_nat_a&quot; {
+vpc_id = aws_vpc.my_vpc.id
+
+route {
+cidr_block = &quot;0.0.0.0/0&quot;
+gateway_id = aws_nat_gateway.nat_gw_a.id
+}
+
+tags = {
+Name = &quot;default_route_a-${var.env}&quot;
+}
+}
+
+resource &quot;aws_route_table&quot; &quot;route_nat_b&quot; {
+vpc_id = aws_vpc.my_vpc.id
+
+route {
+cidr_block = &quot;0.0.0.0/0&quot;
+gateway_id = aws_nat_gateway.nat_gw_b.id
+}
+
+tags = {
+Name = &quot;default_route_b-${var.env}&quot;
+}
+}
+
+resource &quot;aws_route_table&quot; &quot;route&quot; {
+vpc_id = aws_vpc.my_vpc.id
+
+route {
+cidr_block = &quot;0.0.0.0/0&quot;
+gateway_id = aws_internet_gateway.my_igw.id
+}
+
+tags = {
+Name = &quot;custom_route-${var.env}&quot;
+}
+}
+
+resource &quot;aws_route_table_association&quot; &quot;public_a&quot; {
+subnet_id      = aws_subnet.public_a.id
+route_table_id = aws_route_table.route.id
+}
+
+resource &quot;aws_route_table_association&quot; &quot;public_b&quot; {
+subnet_id      = aws_subnet.public_b.id
+route_table_id = aws_route_table.route.id
+}
+
+resource &quot;aws_route_table_association&quot; &quot;private_gitlab_a&quot; {
+subnet_id      = aws_subnet.private_gitlab_a.id
+route_table_id = aws_route_table.route_nat_a.id
+}
+
+resource &quot;aws_route_table_association&quot; &quot;private_gitlab_b&quot; {
+subnet_id      = aws_subnet.private_gitlab_b.id
+route_table_id = aws_route_table.route_nat_b.id
+}
+</code></pre></li>
+
+<li><p>Creating the EIP for the bastion server:</p>
+
+<pre><code>resource &quot;aws_eip&quot; &quot;bastion&quot; {
+vpc = true
+
+tags = {
+Name = &quot;eip_bastion-${var.env}&quot;
+}
+}
+</code></pre></li>
+</ul>
+
+<p><a name="Creating the EFS"></a></p>
+
+<h2 id="creating-the-efs">Creating the EFS</h2>
+
+<h4 id="environments-dev-00-base-efs-tf">environments/dev/00-base/efs.tf</h4>
+
+<pre><code>resource &quot;aws_efs_file_system&quot; &quot;gitlab&quot; {
+  tags = {
+    Name = &quot;gitlab-efs&quot;
+  }
+}
+
+resource &quot;aws_efs_mount_target&quot; &quot;mount_target_a&quot; {
+  file_system_id  = aws_efs_file_system.gitlab.id
+  subnet_id       = aws_subnet.private_a.id
+  security_groups = [aws_security_group.efs.id]
+}
+
+resource &quot;aws_efs_mount_target&quot; &quot;mount_target_b&quot; {
+  file_system_id  = aws_efs_file_system.gitlab.id
+  subnet_id       = aws_subnet.private_b.id
+  security_groups = [aws_security_group.efs.id]
+}
+</code></pre>
+
+<p><a name="Configuring the firewall rules"></a></p>
+
+<h2 id="configuring-the-firewall-rules">Configuring the firewall rules</h2>
+
+<h4 id="modules-base-sg-tf">modules/base/sg.tf</h4>
+
+<p>Bastion:</p>
+
+<pre><code># Rules for Bastion
+resource &quot;aws_security_group&quot; &quot;bastion&quot; {
+  name   = &quot;sg_bastion-${var.env}&quot;
+  vpc_id = aws_vpc.my_vpc.id
+
+  tags = {
+    Name = &quot;bastion_sg-${var.env}&quot;
+  }
+}
+
+# We can access the bastion from our own IP address
+resource &quot;aws_security_group_rule&quot; &quot;bastion_inbound_ssh&quot; {
+  type              = &quot;ingress&quot;
+  from_port         = local.ssh_port
+  to_port           = local.ssh_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = [var.cidr_allowed_ssh]
+  security_group_id = aws_security_group.bastion.id
+}
+
+# The bastion can access all the servers inside our infrastructure through SSH
+resource &quot;aws_security_group_rule&quot; &quot;bastion_outbound_ssh&quot; {
+  type              = &quot;egress&quot;
+  from_port         = local.ssh_port
+  to_port           = local.ssh_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = local.anywhere
+  security_group_id = aws_security_group.bastion.id
+}
+
+# The bastion can upgrade their packages from the Internet
+resource &quot;aws_security_group_rule&quot; &quot;bastion_outbound_http&quot; {
+  type              = &quot;egress&quot;
+  from_port         = local.http_port
+  to_port           = local.http_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = local.anywhere
+  security_group_id = aws_security_group.bastion.id
+}
+
+# The bastion can upgrade their packages from the Internet
+resource &quot;aws_security_group_rule&quot; &quot;bastion_outbound_https&quot; {
+  type              = &quot;egress&quot;
+  from_port         = local.https_port
+  to_port           = local.https_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = local.anywhere
+  security_group_id = aws_security_group.bastion.id
+}
+</code></pre>
+
+<p>Redis:</p>
+
+<pre><code># Rules for Redis
+resource &quot;aws_security_group&quot; &quot;redis&quot; {
+  name   = &quot;sg_redis-${var.env}&quot;
+  vpc_id = aws_vpc.my_vpc.id
+
+  tags = {
+    Name = &quot;redis_sg-${var.env}&quot;
+  }
+}
+
+# The Gitlab server can perform requests to the Redis server
+resource &quot;aws_security_group_rule&quot; &quot;redis_inbound_gitlab&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.redis_port
+  to_port                  = local.redis_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.gitlab.id
+  security_group_id        = aws_security_group.redis.id
+}
+</code></pre>
+
+<p>PostgreSQL:</p>
+
+<pre><code># Rules for PostgreSQL
+resource &quot;aws_security_group&quot; &quot;postgres&quot; {
+  name   = &quot;sg_postgres-${var.env}&quot;
+  vpc_id = aws_vpc.my_vpc.id
+
+  tags = {
+    Name = &quot;postgres_sg-${var.env}&quot;
+  }
+}
+
+# The Gitlab server can perform requests to the PostgreSQL server
+resource &quot;aws_security_group_rule&quot; &quot;postgres_inbound_gitlab&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.postgres_port
+  to_port                  = local.postgres_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.gitlab.id
+  security_group_id        = aws_security_group.postgres.id
+}
+</code></pre>
+
+<p>Public Load Balancer:</p>
+
+<pre><code># Rules for alb gitlab public
+resource &quot;aws_security_group&quot; &quot;alb_gitlab_public&quot; {
+  name   = &quot;sg_alb_gitlab_public-${var.env}&quot;
+  vpc_id = aws_vpc.my_vpc.id
+
+  tags = {
+    Name = &quot;alb_gitlab_public_sg-${var.env}&quot;
+  }
+}
+
+# The public Load Balancer can accept HTTP requests from the Internet 
+resource &quot;aws_security_group_rule&quot; &quot;alb_gitlab_public_inbound_http&quot; {
+  type              = &quot;ingress&quot;
+  from_port         = local.http_port
+  to_port           = local.http_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = local.anywhere
+  security_group_id = aws_security_group.alb_gitlab_public.id
+}
+
+# The public Load Balancer can forward HTTP requests from Internet to the Gitalb servers
+resource &quot;aws_security_group_rule&quot; &quot;alb_gitlab_public_outbound_http&quot; {
+  type                     = &quot;egress&quot;
+  from_port                = local.gitlab_port
+  to_port                  = local.gitlab_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.gitlab.id
+  security_group_id        = aws_security_group.alb_gitlab_public.id
+}
+</code></pre>
+
+<p>Internal Load Balancer:</p>
+
+<pre><code># Rules for alb gitlab internal
+resource &quot;aws_security_group&quot; &quot;alb_gitlab_internal&quot; {
+  name   = &quot;sg_alb_gitlab_internal-${var.env}&quot;
+  vpc_id = aws_vpc.my_vpc.id
+
+  tags = {
+    Name = &quot;alb_gitlab_internal_sg-${var.env}&quot;
+  }
+}
+
+# The Runners can access the Internal Load Balancer
+resource &quot;aws_security_group_rule&quot; &quot;alb_gitlab_internal_inbound_http&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.http_port
+  to_port                  = local.http_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.runner.id
+  security_group_id        = aws_security_group.alb_gitlab_internal.id
+}
+
+# The Internal Load Balancer can forward requests to the Gitlab servers
+resource &quot;aws_security_group_rule&quot; &quot;alb_gitlab_internal_outbound_http&quot; {
+  type                     = &quot;egress&quot;
+  from_port                = local.gitlab_port
+  to_port                  = local.gitlab_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.gitlab.id
+  security_group_id        = aws_security_group.alb_gitlab_internal.id
+}
+</code></pre>
+
+<p>Gitlab:</p>
+
+<pre><code># Rules for Gitlab
+resource &quot;aws_security_group&quot; &quot;gitlab&quot; {
+  name   = &quot;sg_gitlab-${var.env}&quot;
+  vpc_id = aws_vpc.my_vpc.id
+
+  tags = {
+    Name = &quot;gitlab_sg-${var.env}&quot;
+  }
+}
+
+# The bastion can access the Gitlab servers
+resource &quot;aws_security_group_rule&quot; &quot;gitlab_inbound_ssh&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.ssh_port
+  to_port                  = local.ssh_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.bastion.id
+  security_group_id        = aws_security_group.gitlab.id
+}
+
+# The public Load Balancer can forward requests from the Internet to the Gitlab servers
+resource &quot;aws_security_group_rule&quot; &quot;gitlab_inbound_http&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.gitlab_port
+  to_port                  = local.gitlab_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.alb_gitlab_public.id
+  security_group_id        = aws_security_group.gitlab.id
+}
+
+# The internal Load Balancer can forward requests to the Gitlab servers
+resource &quot;aws_security_group_rule&quot; &quot;gitlab_inbound_http_internal&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.gitlab_port
+  to_port                  = local.gitlab_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.alb_gitlab_internal.id
+  security_group_id        = aws_security_group.gitlab.id
+}
+
+# The Gitlab server can make HTTP requests to the Internet
+resource &quot;aws_security_group_rule&quot; &quot;gitlab_outbound_http&quot; {
+  type              = &quot;egress&quot;
+  from_port         = local.http_port
+  to_port           = local.http_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = local.anywhere
+  security_group_id = aws_security_group.gitlab.id
+}
+
+# The Gitlab server can make requests HTTPS to the Internet
+resource &quot;aws_security_group_rule&quot; &quot;gitlab_outbound_https&quot; {
+  type              = &quot;egress&quot;
+  from_port         = local.https_port
+  to_port           = local.https_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = local.anywhere
+  security_group_id = aws_security_group.gitlab.id
+}
+
+# The Gitlab servers can make requests to the Redis server
+resource &quot;aws_security_group_rule&quot; &quot;gitlab_outbound_redis&quot; {
+  type                     = &quot;egress&quot;
+  from_port                = local.redis_port
+  to_port                  = local.redis_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.redis.id
+  security_group_id        = aws_security_group.gitlab.id
+}
+
+# The Gitlab servers can make requests to the PostgreSQL server
+resource &quot;aws_security_group_rule&quot; &quot;gitlab_outbound_postgres&quot; {
+  type                     = &quot;egress&quot;
+  from_port                = local.postgres_port
+  to_port                  = local.postgres_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.postgres.id
+  security_group_id        = aws_security_group.gitlab.id
+}
+
+# The Gitlab servers can access the EFS
+resource &quot;aws_security_group_rule&quot; &quot;gitlab_outbound_efs&quot; {
+  type                     = &quot;egress&quot;
+  from_port                = local.nfs_port
+  to_port                  = local.nfs_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.efs.id
+  security_group_id        = aws_security_group.gitlab.id
+}
+</code></pre>
+
+<p>Runner:</p>
+
+<pre><code># Rules for Runner
+resource &quot;aws_security_group&quot; &quot;runner&quot; {
+  name   = &quot;sg_runner-${var.env}&quot;
+  vpc_id = aws_vpc.my_vpc.id
+
+  tags = {
+    Name = &quot;runner_sg-${var.env}&quot;
+  }
+}
+
+# We can access the runner servers from the bastion through SSH
+resource &quot;aws_security_group_rule&quot; &quot;runner_inbound_ssh&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.ssh_port
+  to_port                  = local.ssh_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.bastion.id
+  security_group_id        = aws_security_group.runner.id
+}
+
+# The runner servers can reach the Internet through HTTP
+resource &quot;aws_security_group_rule&quot; &quot;runner_outbound_http&quot; {
+  type              = &quot;egress&quot;
+  from_port         = local.http_port
+  to_port           = local.http_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = local.anywhere
+  security_group_id = aws_security_group.runner.id
+}
+
+# The runner can reach the Internet through HTTPS
+resource &quot;aws_security_group_rule&quot; &quot;runner_outbound_https&quot; {
+  type              = &quot;egress&quot;
+  from_port         = local.https_port
+  to_port           = local.https_port
+  protocol          = &quot;tcp&quot;
+  cidr_blocks       = local.anywhere
+  security_group_id = aws_security_group.runner.id
+}
+</code></pre>
+
+<p>EFS:</p>
+
+<pre><code># Rules for EFS
+resource &quot;aws_security_group&quot; &quot;efs&quot; {
+  name   = &quot;sg_efs-${var.env}&quot;
+  vpc_id = aws_vpc.my_vpc.id
+
+  tags = {
+    Name = &quot;efs_sg-${var.env}&quot;
+  }
+}
+
+# The Gitlab servers can access the EFS
+resource &quot;aws_security_group_rule&quot; &quot;efs_inbound_gitlab&quot; {
+  type                     = &quot;ingress&quot;
+  from_port                = local.nfs_port
+  to_port                  = local.nfs_port
+  protocol                 = &quot;tcp&quot;
+  source_security_group_id = aws_security_group.gitlab.id
+  security_group_id        = aws_security_group.efs.id
+}
+</code></pre>
+
+<p><a name="Building the bastion"></a></p>
+
+<h2 id="building-the-bastion">Building the bastion</h2>
+
+<h4 id="modules-bastion-main-tf">modules/bastion/main.tf</h4>
+
+<p>I keep one and only one bastion server up and running by using an autoscaling
+group in the public subnet:</p>
+
+<pre><code>data &quot;template_file&quot; &quot;user_data&quot; {
+  template = file(&quot;${path.module}/user-data.sh&quot;)
+
+  vars = {
+    eip_bastion_id = data.terraform_remote_state.base.outputs.aws_eip_bastion_id
+  }
+}
+
+resource &quot;aws_launch_configuration&quot; &quot;bastion&quot; {
+  name                        = &quot;bastion-${var.env}&quot;
+  image_id                    = var.image_id
+  user_data                   = data.template_file.user_data.rendered
+  instance_type               = var.instance_type
+  key_name                    = data.terraform_remote_state.base.outputs.ssh_key
+  security_groups             = [data.terraform_remote_state.base.outputs.sg_bastion_id]
+  iam_instance_profile        = data.terraform_remote_state.base.outputs.iam_instance_profile_name
+  associate_public_ip_address = true
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource &quot;aws_autoscaling_group&quot; &quot;bastion&quot; {
+  name                 = &quot;asg_bastion-${var.env}&quot;
+  launch_configuration = aws_launch_configuration.bastion.id
+  vpc_zone_identifier  = [data.terraform_remote_state.base.outputs.subnet_public_a_id, data.terraform_remote_state.base.outputs.subnet_public_b_id]
+  min_size             = 1
+  max_size             = 1
+
+  tag {
+    key                 = &quot;Name&quot;
+    value               = &quot;bastion-${var.env}&quot;
+    propagate_at_launch = true
+  }
+}
+</code></pre>
+
+<h4 id="modules-bastion-user-data-sh">modules/bastion/user-data.sh</h4>
+
+<p>You can follow the installation process in /var/log/user-data.log, if you
+experience any issues you can take a look in this file.<br />
+The following script will associate the EIP defined in the base stack with
+itself, that is the bastion server. Thus if the bastion experience a downtime
+for any reasons, it will keep the same public IP.</p>
+
+<pre><code>#!/bin/bash
+
+set -x
+
+exec &gt; &gt;(tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console) 2&gt;&amp;1
+sudo yum -y update
+INSTANCE_ID=&quot;$(curl -s http://169.254.169.254/latest/meta-data/instance-id)&quot;
+aws --region eu-west-3 ec2 associate-address --instance-id $INSTANCE_ID --allocation-id ${eip_bastion_id}
+</code></pre>
+
+<p><a name="Building the databases"></a></p>
+
+<h2 id="building-the-databases">Building the databases</h2>
+
+<h4 id="modules-database-main-tf">modules/database/main.tf</h4>
+
+<p>Creating the Redis service:</p>
+
+<pre><code>resource &quot;aws_elasticache_subnet_group&quot; &quot;redis&quot; {
+  name       = &quot;subnet-redis-${var.env}&quot;
+  subnet_ids = [data.terraform_remote_state.base.outputs.subnet_private_a_id, data.terraform_remote_state.base.outputs.subnet_private_b_id]
+}
+
+resource &quot;aws_elasticache_cluster&quot; &quot;redis&quot; {
+  cluster_id           = &quot;cluster-redis&quot;
+  engine               = &quot;redis&quot;
+  node_type            = var.redis_type
+  num_cache_nodes      = 1
+  parameter_group_name = &quot;default.redis6.x&quot;
+  port                 = 6379
+  subnet_group_name    = aws_elasticache_subnet_group.redis.name
+  security_group_ids   = [data.terraform_remote_state.base.outputs.sg_redis_id]
+}
+</code></pre>
+
+<p>Creating the PostgreSQL service:</p>
+
+<pre><code>resource &quot;aws_db_subnet_group&quot; &quot;postgres&quot; {
+  name       = &quot;subnet-postgres-${var.env}&quot;
+  subnet_ids = [data.terraform_remote_state.base.outputs.subnet_private_a_id, data.terraform_remote_state.base.outputs.subnet_private_b_id]
+}
+
+resource &quot;aws_db_instance&quot; &quot;postgres&quot; {
+  allocated_storage       = 5
+  engine                  = &quot;postgres&quot;
+  instance_class          = var.postgres_type
+  name                    = &quot;gitlabhq_production&quot;
+  username                = var.postgres_user
+  password                = var.postgres_pass
+  skip_final_snapshot     = true
+  backup_retention_period = 0
+  vpc_security_group_ids  = [data.terraform_remote_state.base.outputs.sg_postgres_id]
+  db_subnet_group_name    = aws_db_subnet_group.postgres.name
+}
+</code></pre>
+
+<p><a name="Building the Load Balancers"></a></p>
+
+<h2 id="building-the-load-balancers">Building the Load Balancers</h2>
+
+<h4 id="modules-gitlab-alb-tf">modules/gitlab/alb.tf</h4>
+
+<p>The public Load Balancer:</p>
+
+<pre><code>resource &quot;aws_lb&quot; &quot;gitlab_public&quot; {
+  name               = &quot;alb-gitlab-public-${var.env}&quot;
+  internal           = false
+  load_balancer_type = &quot;application&quot;
+  security_groups    = [data.terraform_remote_state.base.outputs.sg_alb_gitlab_public_id]
+  subnets            = [data.terraform_remote_state.base.outputs.subnet_public_a_id, data.terraform_remote_state.base.outputs.subnet_public_b_id]
+}
+
+resource &quot;aws_lb_target_group&quot; &quot;gitlab_public&quot; {
+  port     = 80
+  protocol = &quot;HTTP&quot;
+  vpc_id   = data.terraform_remote_state.base.outputs.vpc_id
+
+  health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 10
+    timeout             = 3
+    interval            = 90
+    path                = &quot;/&quot;
+    matcher             = 302
+  }
+}
+
+resource &quot;aws_lb_listener&quot; &quot;gitlab_public&quot; {
+  load_balancer_arn = aws_lb.gitlab_public.arn
+  port              = 80
+  protocol          = &quot;HTTP&quot;
+
+  default_action {
+    target_group_arn = aws_lb_target_group.gitlab_public.arn
+    type             = &quot;forward&quot;
+  }
+}
+</code></pre>
+
+<p>The private Load Balancer:</p>
+
+<pre><code>resource &quot;aws_lb&quot; &quot;gitlab_internal&quot; {
+  name               = &quot;alb-gitlab-internal-${var.env}&quot;
+  internal           = true
+  load_balancer_type = &quot;application&quot;
+  security_groups    = [data.terraform_remote_state.base.outputs.sg_alb_gitlab_internal_id]
+  subnets            = [data.terraform_remote_state.base.outputs.subnet_private_a_id, data.terraform_remote_state.base.outputs.subnet_private_b_id]
+}
+
+resource &quot;aws_lb_target_group&quot; &quot;gitlab_internal&quot; {
+  port     = 80
+  protocol = &quot;HTTP&quot;
+  vpc_id   = data.terraform_remote_state.base.outputs.vpc_id
+
+  health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 10
+    timeout             = 3
+    interval            = 90
+    path                = &quot;/&quot;
+    matcher             = 302
+  }
+}
+
+resource &quot;aws_lb_listener&quot; &quot;gitlab_internal&quot; {
+  load_balancer_arn = aws_lb.gitlab_internal.arn
+  port              = 80
+  protocol          = &quot;HTTP&quot;
+
+  default_action {
+    target_group_arn = aws_lb_target_group.gitlab_internal.arn
+    type             = &quot;forward&quot;
+  }
+}
+</code></pre>
+
+<p><a name="Building the Gitlab servers"></a></p>
+
+<h2 id="building-the-gitlab-servers">Building the Gitlab servers</h2>
+
+<h4 id="modules-gitlab-main-tf">modules/gitlab/main.tf</h4>
+
+<pre><code>resource &quot;aws_launch_configuration&quot; &quot;gitlab&quot; {
+  name                        = &quot;gitlab-${var.env}&quot;
+  image_id                    = var.image_id
+  user_data                   = data.template_file.user_data.rendered
+  instance_type               = var.instance_type
+  key_name                    = data.terraform_remote_state.base.outputs.ssh_key
+  security_groups             = [data.terraform_remote_state.base.outputs.sg_gitlab_id]
+  iam_instance_profile        = data.terraform_remote_state.base.outputs.iam_instance_profile_name
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource &quot;aws_autoscaling_group&quot; &quot;gitlab&quot; {
+  name                 = &quot;asg_gitlab-${var.env}&quot;
+  launch_configuration = aws_launch_configuration.gitlab.id
+  vpc_zone_identifier  = [data.terraform_remote_state.base.outputs.subnet_private_gitlab_a_id, data.terraform_remote_state.base.outputs.subnet_private_gitlab_
+b_id]
+  target_group_arns    = [aws_lb_target_group.gitlab_public.arn, aws_lb_target_group.gitlab_internal.arn]
+  health_check_type    = &quot;ELB&quot;
+
+  min_size             = var.gitlab_size_desired
+  max_size             = var.gitlab_size_desired
+
+  tag {
+    key                 = &quot;Name&quot;
+    value               = &quot;gitlab-${var.env}&quot;
+    propagate_at_launch = true
+  }
+}
+</code></pre>
+
+<p>The instance type is a <code>c5.xlarge</code>. The variables <code>min_size</code>and <code>max_size</code>
+hold the number of Gitlab desired.</p>
+
+<h4 id="modules-gitlab-user-data-sh">modules/gitlab/user-data.sh</h4>
+
+<p>The following script shows you all the steps for configuring a Gitlab service:</p>
+
+<pre><code>#!/bin/bash
+
+set -x
+
+exec &gt; &gt;(tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console) 2&gt;&amp;1
+mkdir /var/opt/gitlab-nfs
+echo '${efs_dns_name}:/ /var/opt/gitlab-nfs nfs4 vers=4.1,hard,rsize=1048576,wsize=1048576,timeo=600,retrans=2,noresvport 0 2' &gt;&gt; /etc/fstab
+mount /var/opt/gitlab-nfs
+sudo yum -y update
+curl https://packages.gitlab.com/install/repositories/gitlab/gitlab-ee/script.rpm.sh | bash
+EXTERNAL_URL=&quot;http://${alb_dns_name}&quot; yum install -y gitlab-ee
+cat &lt;&lt; EOF &gt;&gt; /etc/gitlab/gitlab.rb
+postgresql['enable'] = false
+gitlab_rails['db_adapter'] = &quot;postgresql&quot;
+gitlab_rails['db_encoding'] = &quot;unicode&quot;
+gitlab_rails['db_database'] = &quot;gitlabhq_production&quot;
+gitlab_rails['db_username'] = &quot;${postgres_user}&quot;
+gitlab_rails['db_password'] = &quot;${postgres_pass}&quot;
+gitlab_rails['db_host'] = &quot;${postgres_address}&quot;
+
+redis['enable'] = false
+gitlab_rails['redis_host'] = &quot;${redis_address}&quot;
+gitlab_rails['redis_port'] = 6379
+
+git_data_dirs({&quot;default&quot; =&gt; { &quot;path&quot; =&gt; &quot;/var/opt/gitlab-nfs/gitlab-data/git-data&quot;} })
+gitlab_rails['uploads_directory'] = '/var/opt/gitlab-nfs/gitlab-data/uploads'
+gitlab_rails['shared_path'] = '/var/opt/gitlab-nfs/gitlab-data/shared'
+gitlab_ci['builds_directory'] = '/var/opt/gitlab-nfs/gitlab-data/builds'
+EOF
+gitlab-ctl reconfigure
+</code></pre>
+
+<p><a name="Building the Gitlab Runners"></a></p>
+
+<h2 id="building-the-gitlab-runners">Building the Gitlab Runners</h2>
+
+<h4 id="modules-runner-main-tf">modules/runner/main.tf</h4>
+
+<pre><code>resource &quot;aws_launch_configuration&quot; &quot;runner&quot; {
+  name                        = &quot;runner-${var.env}&quot;
+  image_id                    = var.image_id
+  user_data                   = data.template_file.user_data.rendered
+  instance_type               = var.instance_type
+  key_name                    = data.terraform_remote_state.base.outputs.ssh_key
+  security_groups             = [data.terraform_remote_state.base.outputs.sg_runner_id]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource &quot;aws_autoscaling_group&quot; &quot;runner&quot; {
+  name                 = &quot;asg_runner-${var.env}&quot;
+  launch_configuration = aws_launch_configuration.runner.id
+  vpc_zone_identifier  = [data.terraform_remote_state.base.outputs.subnet_private_gitlab_a_id, data.terraform_remote_state.base.outputs.subnet_private_gitlab_
+b_id]
+  min_size             = var.runner_nb_desired
+  max_size             = var.runner_nb_desired
+
+  tag {
+    key                 = &quot;Name&quot;
+    value               = &quot;runner-${var.env}&quot;
+    propagate_at_launch = true
+  }
+}
+</code></pre>
+
+<p>The variables <code>min_size</code>and <code>max_size</code> hold the number of Gitlab desired.</p>
+
+<h4 id="modules-runner-user-data-sh">modules/runner/user-data.sh</h4>
+
+<p>The following script shows you all the steps for configuring a Runner server:</p>
+
+<pre><code>#!/bin/bash
+
+set -x
+
+exec &gt; &gt;(tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console) 2&gt;&amp;1
+yum -y update
+yum -y install docker
+yum -y install git
+service docker start
+cd /tmp
+curl -LJO &quot;https://gitlab-runner-downloads.s3.amazonaws.com/latest/rpm/gitlab-runner_amd64.rpm&quot;
+rpm -i gitlab-runner_amd64.rpm
+gitlab-runner register \
+  --non-interactive \
+  --url &quot;http://${alb_internal_dns_name}&quot; \
+  --clone-url &quot;http://${alb_internal_dns_name}&quot; \
+  --registration-token &quot;${gitlab_token}&quot; \
+  --executor &quot;docker&quot; \
+  --docker-image alpine:latest \
+  --description &quot;docker-runner&quot;
+</code></pre>
+
+<p><a name="Deploying the Gitlab infrastructure"></a></p>
+
+<h2 id="deploying-the-gitlab-infrastructure">Deploying the Gitlab infrastructure</h2>
+
+<p>Export the following environment variables:</p>
+
+<pre><code>$ export TF_VAR_region=&quot;eu-west-3&quot;
+$ export TF_VAR_bucket=&quot;yourbucket-terraform-state&quot;
+$ export TF_VAR_dev_base_key=&quot;terraform/dev/base/terraform.tfstate&quot;
+$ export TF_VAR_dev_bastion_key=&quot;terraform/dev/bastion/terraform.tfstate&quot;
+$ export TF_VAR_dev_database_key=&quot;terraform/dev/database/terraform.tfstate&quot;
+$ export TF_VAR_dev_gitlab_key=&quot;terraform/dev/gitlab/terraform.tfstate&quot;
+$ export TF_VAR_dev_runner_key=&quot;terraform/dev/runner/terraform.tfstate&quot;
+$ export TF_VAR_dev_postgres_user=&quot;gitlab&quot;
+$ export TF_VAR_dev_postgres_pass=&quot;XXXXXXXX&quot;
+$ export TF_VAR_dev_gitlab_pass=&quot;XXXXXXXX&quot;
+$ export TF_VAR_ssh_public_key=&quot;ssh-rsa XXXXXXXX...&quot;
+$ export TF_VAR_my_ip_address=$(curl -s 'https://duckduckgo.com/?q=ip&amp;t=h_&amp;ia=answer' \
+| sed -e 's/.*Your IP address is \([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\) in.*/\1/')
+</code></pre>
+
+<p>Perform the following commands for building the infrastructure:</p>
+
+<pre><code>$ cd environments/dev
+$ cd 00-network
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_network_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../01-bastion
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_bastion_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../02-database
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_database_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+$ cd ../03-gitlab
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_gitlab_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+</code></pre>
+
+<p>You can access the Gitlab server for checking the log:</p>
+
+<pre><code>$ ssh -J ec2-user@IP_bastion centos@IP_Gitlab
+$ tail -f /var/log/user-data.log
+</code></pre>
+
+<p>When Gitlab has finished to be installed, you can open your browser and point
+it to the public Load Balancer name, then you will be asked to set your
+password. You can now log in with the root user with its password.</p>
+
+<p>If you want to use runners for leveraging the CI/CD of Gitlab, go to the
+&ldquo;Admin Area&rdquo; then &ldquo;Runners&rdquo;, get the registration token. Now let&rsquo;s build a
+runner by providing the token:</p>
+
+<pre><code>$ cd ../04-runner
+$ terraform init \
+    -backend-config=&quot;bucket=${TF_VAR_bucket}&quot; \
+    -backend-config=&quot;key=${TF_VAR_dev_runner_key}&quot; \
+    -backend-config=&quot;region=${TF_VAR_region}&quot;
+$ terraform apply
+</code></pre>
+
+<p>Wait for a while, then you would see a runner is registred to the Gitlab server.</p>
+
+<p>You need to perform <code>terraform init</code> once.</p>
+
+<p>If you want to increase the number of Gitlab servers or runners, run the
+following command:</p>
+
+<pre><code>$ terraform apply -var=&quot;gitlab_nb_desired=2&quot;
+$ terraform apply -var=&quot;runner_nb_desired=2&quot;
+</code></pre>
+
+<p><a name="Destroying your infrastructure"></a></p>
+
+<h2 id="destroying-your-infrastructure">Destroying your infrastructure</h2>
+
+<p>After finishing your test, destroy your infrastructure:</p>
+
+<pre><code>$ cd environments/dev
+$ cd 04-runner
+$ terraform destroy
+$ cd ../03-gitlab
+$ terraform destroy
+$ cd ../02-database
+$ terraform destroy
+$ cd ../01-bastion
+$ terraform destroy
+$ cd ../00-network
+$ terraform destroy
+</code></pre>
+
+<p><a name="Summary"></a></p>
+
+<h2 id="summary">Summary</h2>
+
+<p>This example gave you an overview of the power of AWS and Terraform, if you
+have managed to build and understand this exercise, I say to you congrats!</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+<script>
+(function() {
+  function center_el(tagName) {
+    var tags = document.getElementsByTagName(tagName), i, tag;
+    for (i = 0; i < tags.length; i++) {
+      tag = tags[i];
+      var parent = tag.parentElement;
+      
+      if (parent.childNodes.length === 1) {
+        
+        if (parent.nodeName === 'A') {
+          parent = parent.parentElement;
+          if (parent.childNodes.length != 1) continue;
+        }
+        if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+      }
+    }
+  }
+  var tagNames = ['img', 'embed', 'object'];
+  for (var i = 0; i < tagNames.length; i++) {
+    center_el(tagNames[i]);
+  }
+})();
+</script>
+
+      
+      <hr/>
+      © 2021 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+  </body>
+</html>
+
