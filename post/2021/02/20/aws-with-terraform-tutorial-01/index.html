@@ -84,7 +84,7 @@ you will able to create a EC2 instance in AWS which we will spin up a web servic
 <li>A Internet Gateway</li>
 <li>A Elastic IP</li>
 <li>A route table</li>
-<li>Some security groups to define firewall rules</li>
+<li>Some security groups to define the firewall rules</li>
 <li>A SSH key for connecting to the EC2</li>
 </ul>
 
@@ -125,12 +125,12 @@ permissions to avoid using the root account</li>
 <li>You must add your AWS credential on your local machine, for example by using
 ~/.aws/config and ~/.aws/credentials files so that Terraform is able to make
 requests to the AWS API</li>
-<li>You must install the latest Terraform version (0.14.x)</li>
+<li>You must install the latest Terraform version</li>
 </ul>
 
 <h2 id="create-a-s3-bucket">Create a S3 bucket</h2>
 
-<p>Terraform must store the state of our current infrastructure somewhere, you
+<p>Terraform need to track the state of our current infrastructure somewhere, you
 could store the state on your local machine but in this case you are the only
 one who can access it. By using a S3 bucket for storing your Terraform state,
 your coworkers can also to access it.<br />
@@ -182,9 +182,9 @@ variable &quot;bucket&quot; {
 }
 </code></pre>
 
-<p>I could set the variables now by using <code>default</code> attribute, but I prefer use
-environment variables in order not to include them on my Github repository
-because datas such as bucket name or SSH keys are sensible.</p>
+<p>I could have set the variables by using the <code>default</code> attribute, but I prefer
+use the environment variables in order not to include them on my Github
+repository because some datas such as bucket name or SSH keys are sensible.</p>
 
 <h4 id="00-bucket-versions-tf">00-bucket/versions.tf</h4>
 
@@ -205,12 +205,13 @@ because datas such as bucket name or SSH keys are sensible.</p>
 │   └── versions.tf
 </code></pre>
 
-<p>You must initialize your working directory in order to retrieve the AWS plugins:</p>
+<p>You must initialize your working directory in order to retrieve the Terraform
+plugins for AWS:</p>
 
 <pre><code>$ terraform init
 </code></pre>
 
-<p>You have now a new .terraform directory created:</p>
+<p>You have now a new .terraform directory that is just created:</p>
 
 <pre><code>├── 00-bucket
 │   ├── .terraform/
@@ -222,8 +223,8 @@ because datas such as bucket name or SSH keys are sensible.</p>
 <h4 id="deployment">Deployment</h4>
 
 <p>In the <code>vars.tf</code> file we have declared 2 variables: <code>region</code> and <code>bucket</code>.<br />
-Export the following environment variables in order to assign values to the
-variables:</p>
+Export the following environment variables in order to assign the values to the
+variables <code>region</code> and <code>bucket</code>:</p>
 
 <pre><code>$ export TF_VAR_region=&quot;eu-west-3&quot;
 $ export TF_VAR_bucket=&quot;mybucket-terraform-state&quot;
@@ -237,8 +238,8 @@ Terraform figures out which variables to use.</p>
 <pre><code>$ terraform apply
 </code></pre>
 
-<p>It will creates a <code>terraform.tfstate</code> file containing the state of our
-infrastructure, you should never delete it!</p>
+<p>It will create a <code>terraform.tfstate</code> file containing the state of our bucket,
+you should never delete it!</p>
 
 <pre><code>├── 00-bucket
 │   ├── main.tf
@@ -247,10 +248,9 @@ infrastructure, you should never delete it!</p>
 │   └── versions.tf
 </code></pre>
 
-<p>Notice it is the only time that we store the Terraform state in our local
-machine in order to create the bucket.<br />
-From now on, we will store Terraform states of all our infrastructure stack in
-this bucket.</p>
+<p>Notice it is the only time that we store a Terraform state in our local
+machine, from now on, we will store the Terraform states of all our
+infrastructure in the bucket that we have just created.</p>
 
 <h2 id="create-the-network-stack">Create the network stack</h2>
 
@@ -391,7 +391,8 @@ output &quot;subnet_public_id&quot; {
 │   └── versions.tf
 </code></pre>
 
-<p>Export the following variables:</p>
+<p>Export the following variables in order to specify our region, bucket and the
+network key:</p>
 
 <pre><code>$ export TF_VAR_region=&quot;eu-west-3&quot;
 $ export TF_VAR_bucket=&quot;yourbucket-terraform-state&quot;
@@ -423,8 +424,7 @@ Create a directory named <code>02-webserver</code> in your working directory.<br
 
 <h4 id="02-webserver-backends-tf">02-webserver/backends.tf</h4>
 
-<p>I declare the remote backend which contains the datas that the network stack has
-exported to our S3 bucket:</p>
+<p>I declare a data object that retrieves the network information from our bucket:</p>
 
 <pre><code>data &quot;terraform_remote_state&quot; &quot;network&quot; {
   backend = &quot;s3&quot;
@@ -452,7 +452,7 @@ distinct stacks using a S3 bucket:</p>
 }
 </code></pre>
 
-<p>I declare a Security Group associated with our VPC for the WebServer:</p>
+<p>I create a Security Group for the WebServer:</p>
 
 <pre><code>resource &quot;aws_security_group&quot; &quot;webserver&quot; {
   name   = &quot;sg_webserver&quot;
@@ -464,9 +464,8 @@ distinct stacks using a S3 bucket:</p>
 }
 </code></pre>
 
-<p>I specify a firewall rule that allows the world to connect to our server via
-SSH (in the real world we should only allow our own IP to connect to our
-instance):</p>
+<p>I create a firewall rule that allows anyone to connect to our server via SSH
+(in the real world we should only allow our own IP to connect to our instance):</p>
 
 <pre><code>resource &quot;aws_security_group_rule&quot; &quot;inbound_ssh&quot; {
   type              = &quot;ingress&quot;
@@ -478,7 +477,7 @@ instance):</p>
 }
 </code></pre>
 
-<p>The following rule allows the world to make HTTP requests to our server:</p>
+<p>The following rule allows anyone to make HTTP requests to our server:</p>
 
 <pre><code>resource &quot;aws_security_group_rule&quot; &quot;inbound_http&quot; {
   type              = &quot;ingress&quot;
@@ -490,8 +489,8 @@ instance):</p>
 }
 </code></pre>
 
-<p>The following rule allows our server to reach Internet, for example to be
-able to update the Linux system:</p>
+<p>The following rule allows our server to reach Internet for being able to update
+the Linux system:</p>
 
 <pre><code>resource &quot;aws_security_group_rule&quot; &quot;outbound_all&quot; {
   type              = &quot;egress&quot;
@@ -567,7 +566,7 @@ variable &quot;ssh_public_key&quot; {
 
 <h4 id="02-webserver-outputs-tf">02-webserver/outputs.tf</h4>
 
-<p>Display the Elastic IP associated to our server so that we can connect to it:</p>
+<p>Display the public IP of our server so that we can connect to it:</p>
 
 <pre><code>output &quot;public_ip&quot; {
   description = &quot;Public IP&quot;
@@ -598,7 +597,7 @@ variable &quot;ssh_public_key&quot; {
 │   └── versions.tf
 </code></pre>
 
-<p>Export the required environment variable containing your public SSH key:</p>
+<p>Export the following environment variable containing your public SSH key:</p>
 
 <pre><code>$ export TF_VAR_ssh_public_key=&quot;ssh-rsa XYZ...&quot;
 </code></pre>
@@ -619,7 +618,7 @@ variable &quot;ssh_public_key&quot; {
 <h2 id="install-a-web-server-with-nginx">Install a Web Server with Nginx</h2>
 
 <p>The previous command displays on the output the public IP address of our
-webserver, wait a few seconds then connect into it via SSH:</p>
+webserver, wait for a while then connect to it via SSH:</p>
 
 <pre><code>$ ssh ec2-user@xx.xx.xx.xx
 # sudo su -
@@ -643,12 +642,12 @@ $ terraform destroy
 tutorials for storing our Terraform states.<br />
 <br />
 You may be wondering why I have decided to split the Terraform code in 3
-sections as I could have written it in the same directory?<br />
+sections instead of writing it in the same directory?<br />
 In the case that you have written all your code in the same directory, if you
 want for example modify the type of your instance, you should destroy all your
-infrastructure then rebuild it. In the case when we split the stacks, we only
-destroy then rebuild the webserver stack, the network stack remains unchanged,
-hence we save more times.</p>
+infrastructure then rebuild it. In the case of our Terraform code is splitted,
+we only destroy then rebuild the webserver stack, the network stack remains
+unchanged, hence we save more times.</p>
 
 <h2 id="summary">Summary</h2>
 

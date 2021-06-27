@@ -110,7 +110,7 @@ Create modules in Terraform Here is the new layout of our Terraform files locate
       <description>Purpose I will show you how to build a simple AWS example using Terraform for your first steps.
 The example that I have chosen is the Getting Started with IPv6 for Amazon VPC, you will able to create a EC2 instance in AWS which we will spin up a web service.
 You will learn how to create:
- A S3 bucket A VPC A public subnet A EC2 using an Amazon Linux image A Internet Gateway A Elastic IP A route table Some security groups to define firewall rules A SSH key for connecting to the EC2  The following figure shows you an overview of what you will build:</description>
+ A S3 bucket A VPC A public subnet A EC2 using an Amazon Linux image A Internet Gateway A Elastic IP A route table Some security groups to define the firewall rules A SSH key for connecting to the EC2  The following figure shows you an overview of what you will build:</description>
     </item>
     
   </channel>
