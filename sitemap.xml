@@ -1,68 +1,42 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
-  
   <url>
     <loc>/post/2021/06/03/aws-with-terraform-tutorial-gitlab/</loc>
     <lastmod>2021-06-03T19:24:14+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/</loc>
     <lastmod>2021-06-03T19:24:14+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/post/</loc>
     <lastmod>2021-06-03T19:24:14+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/post/2021/04/23/aws-with-terraform-tutorial-08/</loc>
     <lastmod>2021-04-23T18:55:17+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/post/2021/04/17/aws-with-terraform-tutorial-07/</loc>
     <lastmod>2021-04-17T18:17:44+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/post/2021/04/05/aws-with-terraform-tutorial-06/</loc>
     <lastmod>2021-04-05T18:33:40+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/post/2021/03/27/aws-with-terraform-tutorial-05/</loc>
     <lastmod>2021-03-27T20:01:59+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/post/2021/03/16/aws-with-terraform-tutorial-04/</loc>
     <lastmod>2021-03-16T20:24:25+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/post/2021/03/06/aws-with-terraform-tutorial-03/</loc>
     <lastmod>2021-03-06T19:34:35+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/post/2021/03/04/aws-with-terraform-tutorial-02/</loc>
     <lastmod>2021-03-04T19:42:41+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/post/2021/02/20/aws-with-terraform-tutorial-01/</loc>
     <lastmod>2021-02-20T15:11:25+00:00</lastmod>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/categories/</loc>
-  </url>
-  
-  <url>
+  </url><url>
     <loc>/tags/</loc>
   </url>
-  
 </urlset>

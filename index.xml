@@ -4,114 +4,72 @@
     <title>Home on home</title>
     <link>/</link>
     <description>Recent content in Home on home</description>
-    <generator>Hugo -- gohugo.io</generator>
+    <generator>Hugo</generator>
     <language>en-us</language>
     <lastBuildDate>Thu, 03 Jun 2021 19:24:14 +0000</lastBuildDate>
-    
-	<atom:link href="/index.xml" rel="self" type="application/rss+xml" />
-    
-    
+    <atom:link href="/index.xml" rel="self" type="application/rss+xml" />
     <item>
       <title>AWS with Terraform tutorial Gitlab</title>
       <link>/post/2021/06/03/aws-with-terraform-tutorial-gitlab/</link>
       <pubDate>Thu, 03 Jun 2021 19:24:14 +0000</pubDate>
-      
       <guid>/post/2021/06/03/aws-with-terraform-tutorial-gitlab/</guid>
-      <description>Table of Contents  Purpose Configuring the network Creating the EFS Configuring the firewall rules Building the bastion Building the databases Building the Load Balancers Building the Gitlab servers Building the Gitlab Runners Deploying the Gitlab infrastructure Destroying your infrastructure Summary  
-Purpose This tutorial is intended to show you how to build Gitlab on AWS automated with Terraform, the source code can be found here.
-The following figure depicts the infrastructure that you will build:</description>
+      <description>&lt;h2 id=&#34;table-of-contents&#34;&gt;Table of Contents&lt;/h2&gt;&#xA;&lt;ol&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Purpose&#34;&gt;Purpose&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Configuring-the-network&#34;&gt;Configuring the network&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Creating-the-EFS&#34;&gt;Creating the EFS&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Configuring-the-firewall-rules&#34;&gt;Configuring the firewall rules&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Building-the-bastion&#34;&gt;Building the bastion&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Building-the-databases&#34;&gt;Building the databases&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Building-the-Load-Balancers&#34;&gt;Building the Load Balancers&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Building-the-Gitlab-servers&#34;&gt;Building the Gitlab servers&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Building-the-Gitlab-Runners&#34;&gt;Building the Gitlab Runners&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Deploying-the-Gitlab-infrastructure&#34;&gt;Deploying the Gitlab infrastructure&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Destroying-your-infrastructure&#34;&gt;Destroying your infrastructure&lt;/a&gt;&lt;/li&gt;&#xA;&lt;li&gt;&lt;a href=&#34;#Summary&#34;&gt;Summary&lt;/a&gt;&lt;/li&gt;&#xA;&lt;/ol&gt;&#xA;&lt;p&gt;&lt;a name=&#34;Purpose&#34;&gt;&lt;/a&gt;&lt;/p&gt;&#xA;&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial is intended to show you how to build Gitlab on AWS automated with&#xA;Terraform, the source code can be found &lt;a href=&#34;https://github.com/richardpct/aws-terraform-gitlab&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;p&gt;The following figure depicts the infrastructure that you will build:&lt;/p&gt;</description>
     </item>
-    
     <item>
       <title>AWS with Terraform tutorial 08</title>
       <link>/post/2021/04/23/aws-with-terraform-tutorial-08/</link>
       <pubDate>Fri, 23 Apr 2021 18:55:17 +0000</pubDate>
-      
       <guid>/post/2021/04/23/aws-with-terraform-tutorial-08/</guid>
-      <description>Purpose This tutorial takes up the previous one aws-terraform-tuto07 by adding autoscaling policy in order to scale our web server according to a metric that you chose, for our example I chose to add a web server if the CPU Load is higher than a threshold that I have defined.
-The following figure depicts the infrastructure you will build:
-The source code can be found here.
-Configuring the autoscaling policy modules/webserver/main.</description>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial takes up the previous one&#xA;&lt;a href=&#34;https://richardpct.github.io/post/2021/04/17/aws-with-terraform-tutorial-07/&#34;&gt;aws-terraform-tuto07&lt;/a&gt;&#xA;by adding autoscaling policy in order to scale our web server according to a&#xA;metric that you chose, for our example I chose to add a web server if the CPU&#xA;Load is higher than a threshold that I have defined.&lt;/p&gt;&#xA;&lt;p&gt;The following figure depicts the infrastructure you will build:&lt;/p&gt;&#xA;&lt;div style=&#34;text-align: center;&#34;&gt;&#xA;  &lt;img src=&#34;https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-08/image01.png&#34;&gt;&#xA;&lt;/div&gt;&#xA;&lt;p&gt;The source code can be found &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto08&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;h2 id=&#34;configuring-the-autoscaling-policy&#34;&gt;Configuring the autoscaling policy&lt;/h2&gt;&#xA;&lt;h4 id=&#34;moduleswebservermaintf&#34;&gt;modules/webserver/main.tf&lt;/h4&gt;&#xA;&lt;p&gt;I only show the relevant excerpt on how to configure the autoscaling policy:&lt;/p&gt;</description>
     </item>
-    
     <item>
       <title>AWS with Terraform tutorial 07</title>
       <link>/post/2021/04/17/aws-with-terraform-tutorial-07/</link>
       <pubDate>Sat, 17 Apr 2021 18:17:44 +0000</pubDate>
-      
       <guid>/post/2021/04/17/aws-with-terraform-tutorial-07/</guid>
-      <description>Purpose This tutorial takes up the previous one aws-terraform-tuto06 by adding an ALB (Application Load Balancer) in front of the 2 web servers for sharing the load between 2 web servers and having a short downtime when a web server is failing.
-The following figure depicts the infrastructure you will build:
-The source code can be found here.
-Configuring the network environments/dev/00-base/main.tf The following code shows how the subnets are configured:</description>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial takes up the previous one&#xA;&lt;a href=&#34;https://richardpct.github.io/post/2021/04/05/aws-with-terraform-tutorial-06/&#34;&gt;aws-terraform-tuto06&lt;/a&gt;&#xA;by adding an ALB (Application Load Balancer) in front of the 2 web servers for&#xA;sharing the load between 2 web servers and having a short downtime when a web&#xA;server is failing.&lt;/p&gt;&#xA;&lt;p&gt;The following figure depicts the infrastructure you will build:&lt;/p&gt;&#xA;&lt;div style=&#34;text-align: center;&#34;&gt;&#xA;  &lt;img src=&#34;https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-07/image01.png&#34;&gt;&#xA;&lt;/div&gt;&#xA;&lt;p&gt;The source code can be found &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto07&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;h2 id=&#34;configuring-the-network&#34;&gt;Configuring the network&lt;/h2&gt;&#xA;&lt;h4 id=&#34;environmentsdev00-basemaintf&#34;&gt;environments/dev/00-base/main.tf&lt;/h4&gt;&#xA;&lt;p&gt;The following code shows how the subnets are configured:&lt;/p&gt;</description>
     </item>
-    
     <item>
       <title>AWS with Terraform tutorial 06</title>
       <link>/post/2021/04/05/aws-with-terraform-tutorial-06/</link>
       <pubDate>Mon, 05 Apr 2021 18:33:40 +0000</pubDate>
-      
       <guid>/post/2021/04/05/aws-with-terraform-tutorial-06/</guid>
-      <description>Purpose This tutorial takes up the previous one aws-with-terraform-tutorial-05 by leveraging the high availability feature provided by AWS. Imagine that your bastion or your webserver are crashing for any reasons, they will be automatically recreated using autoscaling group, hence your service will experience a short downtime.
-For keeping the same EIP (Elastic IP) when a new instance will replace the old one, this instance requires to perform an aws command that associates the EIP with itself.</description>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial takes up the previous one&#xA;&lt;a href=&#34;https://richardpct.github.io/post/2021/03/27/aws-with-terraform-tutorial-05/&#34;&gt;aws-with-terraform-tutorial-05&lt;/a&gt;&#xA;by leveraging the high availability feature provided by AWS.&#xA;Imagine that your bastion or your webserver are crashing for any reasons, they&#xA;will be automatically recreated using autoscaling group, hence your service&#xA;will experience a short downtime.&lt;br /&gt;&#xA;For keeping the same EIP (Elastic IP) when a new instance will replace the old&#xA;one, this instance requires to perform an aws command that associates the EIP&#xA;with itself.&lt;br /&gt;&#xA;In addition, I no longer use a Redis server using an EC2, instead I will use&#xA;the Elastic Cache service provided by AWS.&lt;/p&gt;</description>
     </item>
-    
     <item>
       <title>AWS with Terraform tutorial 05</title>
       <link>/post/2021/03/27/aws-with-terraform-tutorial-05/</link>
       <pubDate>Sat, 27 Mar 2021 20:01:59 +0000</pubDate>
-      
       <guid>/post/2021/03/27/aws-with-terraform-tutorial-05/</guid>
-      <description>Purpose This tutorial takes up the previous one aws-with-terraform-tutorial-04 by adding a bastion server which is the only one that is allowed to connect to the database and the webserver via SSH for improving the security of your infrastructure.
-Here are the components you will build:
- Creating a VPC with 3 public subnets and a private subnet Creating a bastion server in a public subnet which is the only server that can be reachable from the Internet via SSH, and it is the only that is allowed to connect to the database and the webserver via SSH Creating a web server in a public subnet Creating a database server using Redis which stores the count of requests Creating a NAT gateway with an Elastic IP (EIP) in a public subnet so that the database which is in the private subnet is able to reach Internet  Notice: For the exercise I do not use &amp;ldquo;Elastic Cache&amp;rdquo; service provided by AWS, instead I use an EC2 instance and I install Redis manually.</description>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial takes up the previous one&#xA;&lt;a href=&#34;https://richardpct.github.io/post/2021/03/16/aws-with-terraform-tutorial-04/&#34;&gt;aws-with-terraform-tutorial-04&lt;/a&gt;&#xA;by adding a bastion server which is the only one that is allowed to connect to&#xA;the database and the webserver via SSH for improving the security of your&#xA;infrastructure.&lt;/p&gt;&#xA;&lt;p&gt;Here are the components you will build:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;Creating a VPC with 3 public subnets and a private subnet&lt;/li&gt;&#xA;&lt;li&gt;Creating a bastion server in a public subnet which is the only server that&#xA;can be reachable from the Internet via SSH, and it is the only that is allowed&#xA;to connect to the database and the webserver via SSH&lt;/li&gt;&#xA;&lt;li&gt;Creating a web server in a public subnet&lt;/li&gt;&#xA;&lt;li&gt;Creating a database server using Redis which stores the count of requests&lt;/li&gt;&#xA;&lt;li&gt;Creating a NAT gateway with an Elastic IP (EIP) in a public subnet so that&#xA;the database which is in the private subnet is able to reach Internet&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;Notice: For the exercise I do not use &amp;ldquo;Elastic Cache&amp;rdquo; service provided by AWS,&#xA;instead I use an EC2 instance and I install Redis manually.&lt;/p&gt;</description>
     </item>
-    
     <item>
       <title>AWS with Terraform tutorial 04</title>
       <link>/post/2021/03/16/aws-with-terraform-tutorial-04/</link>
       <pubDate>Tue, 16 Mar 2021 20:24:25 +0000</pubDate>
-      
       <guid>/post/2021/03/16/aws-with-terraform-tutorial-04/</guid>
-      <description>Purpose I will show you how to build a scenario more complex than the previous one using a public and a private subnet in the same VPC. The scenario takes up this tutorial Scenario 2: VPC with Public and Private Subnets (NAT), here are the components you will build:
- Creating a VPC with a public and a private subnet Creating a webserver in the public subnet Creating a database server using Redis which stores the count of requests, only the webserver is allowed to connect to the database server using firewall rules called &amp;ldquo;Security Group&amp;rdquo; Creating a NAT gateway with an Elastic IP (EIP) located in the public subnet so that the database which is in the private subnet can reach Internet  Notice: For this exercise I do not use &amp;ldquo;Elastic Cache&amp;rdquo; service provided by AWS, instead I use an EC2 instance where I install Redis.</description>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;I will show you how to build a scenario more complex than the previous one&#xA;using a public and a private subnet in the same VPC. The scenario takes up this&#xA;tutorial&#xA;&lt;a href=&#34;https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Scenario2.html?shortFooter=true&#34;&gt;Scenario 2: VPC with Public and Private Subnets (NAT)&lt;/a&gt;,&#xA;here are the components you will build:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;Creating a VPC with a public and a private subnet&lt;/li&gt;&#xA;&lt;li&gt;Creating a webserver in the public subnet&lt;/li&gt;&#xA;&lt;li&gt;Creating a database server using Redis which stores the count of requests,&#xA;only the webserver is allowed to connect to the database server using firewall rules called &amp;ldquo;Security Group&amp;rdquo;&lt;/li&gt;&#xA;&lt;li&gt;Creating a NAT gateway with an Elastic IP (EIP) located in the public subnet&#xA;so that the database which is in the private subnet can reach Internet&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;Notice: For this exercise I do not use &amp;ldquo;Elastic Cache&amp;rdquo; service provided by AWS,&#xA;instead I use an EC2 instance where I install Redis.&lt;/p&gt;</description>
     </item>
-    
     <item>
       <title>AWS with Terraform tutorial 03</title>
       <link>/post/2021/03/06/aws-with-terraform-tutorial-03/</link>
       <pubDate>Sat, 06 Mar 2021 19:34:35 +0000</pubDate>
-      
       <guid>/post/2021/03/06/aws-with-terraform-tutorial-03/</guid>
-      <description>Purpose I will introduce you a way to split your infrastructure in distinct environment by leveraging Terraform modules.
-In this tutorial I use the same AWS account to handle multiple environments in order to simplify the exercise, but in the real life you must use a AWS account for each environment for increasing isolation.
-I take up the previous tutorial by adding some improvements:
- Splitting our infrastructure by environment: Dev and Staging Using user-data for automating Nginx installation Allowing only my IP own address to connect via SSH within the webserver  Here is an overview of the infrastructure you will build in this tutorial:</description>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;I will introduce you a way to split your infrastructure in distinct environment&#xA;by leveraging Terraform modules.&lt;br /&gt;&#xA;In this tutorial I use the same AWS account to handle multiple environments in&#xA;order to simplify the exercise, but in the real life you must use a AWS account&#xA;for each environment for increasing isolation.&lt;/p&gt;&#xA;&lt;p&gt;I take up the previous tutorial by adding some improvements:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;Splitting our infrastructure by environment: Dev and Staging&lt;/li&gt;&#xA;&lt;li&gt;Using user-data for automating Nginx installation&lt;/li&gt;&#xA;&lt;li&gt;Allowing only my IP own address to connect via SSH within the webserver&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;Here is an overview of the infrastructure you will build in this tutorial:&lt;/p&gt;</description>
     </item>
-    
     <item>
       <title>AWS with Terraform tutorial 02</title>
       <link>/post/2021/03/04/aws-with-terraform-tutorial-02/</link>
       <pubDate>Thu, 04 Mar 2021 19:42:41 +0000</pubDate>
-      
       <guid>/post/2021/03/04/aws-with-terraform-tutorial-02/</guid>
-      <description>Purpose This tutorial takes up the previous one in improving our code by using the modules. A module in Terraform acts like a funtion in a programming language, and like a function we can provide some parameters.
-It is a good practice to work with, and you know the famous adage in computer science? &amp;ldquo;Don&amp;rsquo;t repeat yourself!&amp;rdquo;.
-The source code is available on my Github repository.
-Create modules in Terraform Here is the new layout of our Terraform files located in our file system:</description>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial takes up the previous one in improving our code by using the&#xA;modules. A module in Terraform acts like a funtion in a programming language,&#xA;and like a function we can provide some parameters.&lt;br /&gt;&#xA;It is a good practice to work with, and you know the famous adage in computer&#xA;science? &amp;ldquo;Don&amp;rsquo;t repeat yourself!&amp;rdquo;.&lt;br /&gt;&lt;/p&gt;&#xA;&lt;p&gt;The source code is available on my &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto02&#34;&gt;Github repository&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;h2 id=&#34;create-modules-in-terraform&#34;&gt;Create modules in Terraform&lt;/h2&gt;&#xA;&lt;p&gt;Here is the new layout of our Terraform files located in our file system:&lt;/p&gt;</description>
     </item>
-    
     <item>
       <title>AWS with Terraform tutorial 01</title>
       <link>/post/2021/02/20/aws-with-terraform-tutorial-01/</link>
       <pubDate>Sat, 20 Feb 2021 15:11:25 +0000</pubDate>
-      
       <guid>/post/2021/02/20/aws-with-terraform-tutorial-01/</guid>
-      <description>Purpose I will show you how to build a simple AWS example using Terraform for your first steps.
-The example that I have chosen is the Getting Started with IPv6 for Amazon VPC, you will able to create a EC2 instance in AWS which we will spin up a web service.
-You will learn how to create:
- A S3 bucket A VPC A public subnet A EC2 using an Amazon Linux image A Internet Gateway A Elastic IP A route table Some security groups to define the firewall rules A SSH key for connecting to the EC2  The following figure shows you an overview of what you will build:</description>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;I will show you how to build a simple AWS example using Terraform for your&#xA;first steps.&lt;br /&gt;&#xA;The example that I have chosen is &lt;a href=&#34;https://docs.aws.amazon.com/vpc/latest/userguide/get-started-ipv6.html&#34;&gt;the Getting Started with IPv6 for Amazon VPC&lt;/a&gt;,&#xA;you will able to create a EC2 instance in AWS which we will spin up a web service.&lt;/p&gt;&#xA;&lt;p&gt;You will learn how to create:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;A S3 bucket&lt;/li&gt;&#xA;&lt;li&gt;A VPC&lt;/li&gt;&#xA;&lt;li&gt;A public subnet&lt;/li&gt;&#xA;&lt;li&gt;A EC2 using an Amazon Linux image&lt;/li&gt;&#xA;&lt;li&gt;A Internet Gateway&lt;/li&gt;&#xA;&lt;li&gt;A Elastic IP&lt;/li&gt;&#xA;&lt;li&gt;A route table&lt;/li&gt;&#xA;&lt;li&gt;Some security groups to define the firewall rules&lt;/li&gt;&#xA;&lt;li&gt;A SSH key for connecting to the EC2&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;The following figure shows you an overview of what you will build:&lt;/p&gt;</description>
     </item>
-    
   </channel>
 </rss>

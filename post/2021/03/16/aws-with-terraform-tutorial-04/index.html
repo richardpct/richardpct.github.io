@@ -1,9 +1,6 @@
 <!DOCTYPE html>
 <html lang="en-us">
   <head>
-    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/atom-one-light.min.css">
-    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"></script>
-    <script>hljs.initHighlightingOnLoad();</script>
 
     <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
@@ -17,37 +14,36 @@
     <link rel="stylesheet" href="/css/style.css" />
     <link rel="stylesheet" href="/css/fonts.css" />
     <link rel="stylesheet" href="/css/theme-override.css">
-    <header>
-
-  <nav>
-    <ul>
-      
-      
-      <li class="pull-left ">
-        <a href="/">~/home</a>
-      </li>
-      
-      
-      <li class="pull-left ">
-        <a href="https://github.com/richardpct">~/github</a>
-      </li>
-      
-      
-      <li class="pull-left ">
-        <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
-      </li>
-      
-
-      
-
-    </ul>
-  </nav>
-</header>
-
+    
   </head>
 
   <body>
-    <br/>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
 
 <div class="article-meta">
 <h1><span class="title">AWS with Terraform tutorial 04</span></h1>
@@ -63,18 +59,15 @@
 </div>
 
 
+
 <div class="content-wrapper">
   <main>
-    
-
-<h2 id="purpose">Purpose</h2>
-
+    <h2 id="purpose">Purpose</h2>
 <p>I will show you how to build a scenario more complex than the previous one
 using a public and a private subnet in the same VPC. The scenario takes up this
 tutorial
 <a href="https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Scenario2.html?shortFooter=true">Scenario 2: VPC with Public and Private Subnets (NAT)</a>,
 here are the components you will build:</p>
-
 <ul>
 <li>Creating a VPC with a public and a private subnet</li>
 <li>Creating a webserver in the public subnet</li>
@@ -83,266 +76,222 @@ only the webserver is allowed to connect to the database server using firewall r
 <li>Creating a NAT gateway with an Elastic IP (EIP) located in the public subnet
 so that the database which is in the private subnet can reach Internet</li>
 </ul>
-
 <p>Notice: For this exercise I do not use &ldquo;Elastic Cache&rdquo; service provided by AWS,
 instead I use an EC2 instance where I install Redis.</p>
-
 <p>The following figure depicts the infrastructure you will build:</p>
-
-<p><img src="https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-04/image01.png"></p>
-
+<div style="text-align: center;">
+  <img src="https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-04/image01.png">
+</div>
 <p>A public subnet is an area where it can reach Internet and Internet can reach
 it, whereas a private subnet is an area where it can reach Internet via a NAT
 gateway but Internet can&rsquo;t reach it.<br /></p>
-
 <p>The Terraform code can be found <a href="https://github.com/richardpct/aws-terraform-tuto04">here</a>.</p>
-
 <h2 id="network-configuration">Network configuration</h2>
-
 <p>I will show you how to configure the network stack including the building of
 the subnets and the firewall rules, I only show the relevant excerpt</p>
-
-<h4 id="modules-network-main-tf">modules/network/main.tf</h4>
-
+<h4 id="modulesnetworkmaintf">modules/network/main.tf</h4>
 <p>Create the public subnet and their components (I remind you a public subnet is
 a subnet which its default route is the Internet Gateway):</p>
-
-<pre><code># Create the Internet Gateway
-resource &quot;aws_internet_gateway&quot; &quot;my_igw&quot; {
+<pre tabindex="0"><code># Create the Internet Gateway
+resource &#34;aws_internet_gateway&#34; &#34;my_igw&#34; {
   vpc_id = aws_vpc.my_vpc.id
 
   tags = {
-    Name = &quot;my_igw-${var.env}&quot;
+    Name = &#34;my_igw-${var.env}&#34;
   }
 }
 
 # Create the public subnet
-resource &quot;aws_subnet&quot; &quot;public&quot; {
+resource &#34;aws_subnet&#34; &#34;public&#34; {
   vpc_id     = aws_vpc.my_vpc.id
   cidr_block = var.subnet_public
 
   tags = {
-    Name = &quot;subnet_public-${var.env}&quot;
+    Name = &#34;subnet_public-${var.env}&#34;
   }
 }
 
 # Create a custom route table
-resource &quot;aws_route_table&quot; &quot;route&quot; {
+resource &#34;aws_route_table&#34; &#34;route&#34; {
   vpc_id = aws_vpc.my_vpc.id
 
   route {
-    cidr_block = &quot;0.0.0.0/0&quot;
+    cidr_block = &#34;0.0.0.0/0&#34;
     gateway_id = aws_internet_gateway.my_igw.id
   }
 
   tags = {
-    Name = &quot;custom_route-${var.env}&quot;
+    Name = &#34;custom_route-${var.env}&#34;
   }
 }
 
 # Associate the subnet with the default route table
-resource &quot;aws_route_table_association&quot; &quot;public&quot; {
+resource &#34;aws_route_table_association&#34; &#34;public&#34; {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.route.id
 }
 
 # Create an Elastic IP for the Nat Gateway
-resource &quot;aws_eip&quot; &quot;nat&quot; {
+resource &#34;aws_eip&#34; &#34;nat&#34; {
   vpc = true
 
   tags = {
-    Name = &quot;eip_nat-${var.env}&quot;
+    Name = &#34;eip_nat-${var.env}&#34;
   }
 }
 
 # Create a Nat Gateway in the public subnet
-resource &quot;aws_nat_gateway&quot; &quot;gw&quot; {
+resource &#34;aws_nat_gateway&#34; &#34;gw&#34; {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public.id
 
   tags = {
-    Name = &quot;nat_gw-${var.env}&quot;
+    Name = &#34;nat_gw-${var.env}&#34;
   }
 }
-</code></pre>
-
-<p>Create the private subnet (I remind you a private subnet is a subnet which its
+</code></pre><p>Create the private subnet (I remind you a private subnet is a subnet which its
 default route is the Nat Gateway):</p>
-
-<pre><code># Create a private subnet
-resource &quot;aws_subnet&quot; &quot;private&quot; {
+<pre tabindex="0"><code># Create a private subnet
+resource &#34;aws_subnet&#34; &#34;private&#34; {
   vpc_id     = aws_vpc.my_vpc.id
   cidr_block = var.subnet_private
 
   tags = {
-    Name = &quot;subnet_private-${var.env}&quot;
+    Name = &#34;subnet_private-${var.env}&#34;
   }
 }
 
 # Use the default route table for the private subnet
-resource &quot;aws_default_route_table&quot; &quot;route&quot; {
+resource &#34;aws_default_route_table&#34; &#34;route&#34; {
   default_route_table_id = aws_vpc.my_vpc.default_route_table_id
 
   route {
-    cidr_block = &quot;0.0.0.0/0&quot;
+    cidr_block = &#34;0.0.0.0/0&#34;
     gateway_id = aws_nat_gateway.gw.id
   }
 
   tags = {
-    Name = &quot;default_route-${var.env}&quot;
+    Name = &#34;default_route-${var.env}&#34;
   }
 }
 
 # Associate the private subnet with the default route table
-resource &quot;aws_route_table_association&quot; &quot;private&quot; {
+resource &#34;aws_route_table_association&#34; &#34;private&#34; {
   subnet_id      = aws_subnet.private.id
   route_table_id = aws_default_route_table.route.id
 }
-</code></pre>
-
-<h4 id="modules-network-sg-tf">modules/network/sg.tf</h4>
-
+</code></pre><h4 id="modulesnetworksgtf">modules/network/sg.tf</h4>
 <p>Create a security group for the database stack and for the webserver stack:</p>
-
-<pre><code>resource &quot;aws_security_group&quot; &quot;database&quot; {
-  name   = &quot;sg_database-${var.env}&quot;
+<pre tabindex="0"><code>resource &#34;aws_security_group&#34; &#34;database&#34; {
+  name   = &#34;sg_database-${var.env}&#34;
   vpc_id = aws_vpc.my_vpc.id
 
   tags = {
-    Name = &quot;database_sg-${var.env}&quot;
+    Name = &#34;database_sg-${var.env}&#34;
   }
 }
 
-resource &quot;aws_security_group&quot; &quot;webserver&quot; {
-  name   = &quot;sg_webserver-${var.env}&quot;
+resource &#34;aws_security_group&#34; &#34;webserver&#34; {
+  name   = &#34;sg_webserver-${var.env}&#34;
   vpc_id = aws_vpc.my_vpc.id
 
   tags = {
-    Name = &quot;webserver_sg-${var.env}&quot;
+    Name = &#34;webserver_sg-${var.env}&#34;
   }
 }
-</code></pre>
-
-<p>Only the webserver is allowed to make requests to the database on the Redis
+</code></pre><p>Only the webserver is allowed to make requests to the database on the Redis
 port:</p>
-
-<pre><code>resource &quot;aws_security_group_rule&quot; &quot;database_inbound_redis&quot; {
-  type                     = &quot;ingress&quot;
+<pre tabindex="0"><code>resource &#34;aws_security_group_rule&#34; &#34;database_inbound_redis&#34; {
+  type                     = &#34;ingress&#34;
   from_port                = local.redis_port
   to_port                  = local.redis_port
-  protocol                 = &quot;tcp&quot;
+  protocol                 = &#34;tcp&#34;
   source_security_group_id = aws_security_group.webserver.id
   security_group_id        = aws_security_group.database.id
 }
-</code></pre>
-
-<p>Set some rules so that the database can update its system and softwares on
+</code></pre><p>Set some rules so that the database can update its system and softwares on
 Internet:</p>
-
-<pre><code>resource &quot;aws_security_group_rule&quot; &quot;database_outbound_http&quot; {
-  type              = &quot;egress&quot;
+<pre tabindex="0"><code>resource &#34;aws_security_group_rule&#34; &#34;database_outbound_http&#34; {
+  type              = &#34;egress&#34;
   from_port         = local.http_port
   to_port           = local.http_port
-  protocol          = &quot;tcp&quot;
+  protocol          = &#34;tcp&#34;
   cidr_blocks       = local.anywhere
   security_group_id = aws_security_group.database.id
 }
 
-resource &quot;aws_security_group_rule&quot; &quot;database_outbound_https&quot; {
-  type              = &quot;egress&quot;
+resource &#34;aws_security_group_rule&#34; &#34;database_outbound_https&#34; {
+  type              = &#34;egress&#34;
   from_port         = local.https_port
   to_port           = local.https_port
-  protocol          = &quot;tcp&quot;
+  protocol          = &#34;tcp&#34;
   cidr_blocks       = local.anywhere
   security_group_id = aws_security_group.database.id
 }
-</code></pre>
-
-<p>Only your own IP is allowed to connect to the webserver via SSH:</p>
-
-<pre><code>resource &quot;aws_security_group_rule&quot; &quot;webserver_inbound_ssh&quot; {
-  type              = &quot;ingress&quot;
+</code></pre><p>Only your own IP is allowed to connect to the webserver via SSH:</p>
+<pre tabindex="0"><code>resource &#34;aws_security_group_rule&#34; &#34;webserver_inbound_ssh&#34; {
+  type              = &#34;ingress&#34;
   from_port         = local.ssh_port
   to_port           = local.ssh_port
-  protocol          = &quot;tcp&quot;
+  protocol          = &#34;tcp&#34;
   cidr_blocks       = [var.cidr_allowed_ssh]
   security_group_id = aws_security_group.webserver.id
 }
-</code></pre>
-
-<p>Anyone can make HTTP requests to the webserver:</p>
-
-<pre><code>resource &quot;aws_security_group_rule&quot; &quot;webserver_inbound_http&quot; {
-  type              = &quot;ingress&quot;
+</code></pre><p>Anyone can make HTTP requests to the webserver:</p>
+<pre tabindex="0"><code>resource &#34;aws_security_group_rule&#34; &#34;webserver_inbound_http&#34; {
+  type              = &#34;ingress&#34;
   from_port         = local.webserver_port
   to_port           = local.webserver_port
-  protocol          = &quot;tcp&quot;
+  protocol          = &#34;tcp&#34;
   cidr_blocks       = local.anywhere
   security_group_id = aws_security_group.webserver.id
 }
-</code></pre>
-
-<p>Set some rules so that the webserver can update its system and softwares on
+</code></pre><p>Set some rules so that the webserver can update its system and softwares on
 Internet:</p>
-
-<pre><code>resource &quot;aws_security_group_rule&quot; &quot;webserver_outbound_http&quot; {
-  type              = &quot;egress&quot;
+<pre tabindex="0"><code>resource &#34;aws_security_group_rule&#34; &#34;webserver_outbound_http&#34; {
+  type              = &#34;egress&#34;
   from_port         = local.http_port
   to_port           = local.http_port
-  protocol          = &quot;tcp&quot;
+  protocol          = &#34;tcp&#34;
   cidr_blocks       = local.anywhere
   security_group_id = aws_security_group.webserver.id
 }
 
-resource &quot;aws_security_group_rule&quot; &quot;webserver_outbound_https&quot; {
-  type              = &quot;egress&quot;
+resource &#34;aws_security_group_rule&#34; &#34;webserver_outbound_https&#34; {
+  type              = &#34;egress&#34;
   from_port         = local.https_port
   to_port           = local.https_port
-  protocol          = &quot;tcp&quot;
+  protocol          = &#34;tcp&#34;
   cidr_blocks       = local.anywhere
   security_group_id = aws_security_group.webserver.id
 }
-</code></pre>
-
-<p>The webserver is allowed to connect to the database:</p>
-
-<pre><code>resource &quot;aws_security_group_rule&quot; &quot;webserver_outbound_redis&quot; {
-  type                     = &quot;egress&quot;
+</code></pre><p>The webserver is allowed to connect to the database:</p>
+<pre tabindex="0"><code>resource &#34;aws_security_group_rule&#34; &#34;webserver_outbound_redis&#34; {
+  type                     = &#34;egress&#34;
   from_port                = local.redis_port
   to_port                  = local.redis_port
-  protocol                 = &quot;tcp&quot;
+  protocol                 = &#34;tcp&#34;
   source_security_group_id = aws_security_group.database.id
   security_group_id        = aws_security_group.webserver.id
 }
-</code></pre>
-
-<h2 id="redis-configuration">Redis configuration</h2>
-
+</code></pre><h2 id="redis-configuration">Redis configuration</h2>
 <p>Only the user-data script deserves to be showed here:</p>
-
-<h4 id="modules-database-user-data-sh">modules/database/user-data.sh</h4>
-
-<pre><code>#!/bin/bash
+<h4 id="modulesdatabaseuser-datash">modules/database/user-data.sh</h4>
+<pre tabindex="0"><code>#!/bin/bash
 
 exec &gt; &gt;(tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console) 2&gt;&amp;1
 sudo apt-get update
 sudo apt-get -y upgrade
 sudo apt-get -y install redis
-sudo sed -i -e 's/^\(bind 127.0.0.1 ::1\)/#\1/' /etc/redis/redis.conf
-sudo sed -i -e 's/# \(requirepass\) foobared/\1 ${database_pass}/' /etc/redis/redis.conf
+sudo sed -i -e &#39;s/^\(bind 127.0.0.1 ::1\)/#\1/&#39; /etc/redis/redis.conf
+sudo sed -i -e &#39;s/# \(requirepass\) foobared/\1 ${database_pass}/&#39; /etc/redis/redis.conf
 sudo systemctl restart redis
-</code></pre>
-
-<p>I allow all network interfaces to be listened on Redis port then I set the
+</code></pre><p>I allow all network interfaces to be listened on Redis port then I set the
 password.</p>
-
 <h2 id="webserver-configuration">Webserver configuration</h2>
-
 <p>Likewise only the user-data script deserves to be showed here:</p>
-
-<h4 id="modules-webserver-user-data-sh">modules/webserver/user-data.sh</h4>
-
-<pre><code>#!/bin/bash
+<h4 id="moduleswebserveruser-datash">modules/webserver/user-data.sh</h4>
+<pre tabindex="0"><code>#!/bin/bash
 
 exec &gt; &gt;(tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console) 2&gt;&amp;1
 sudo yum -y update
@@ -358,34 +307,29 @@ cat &lt;&lt; EOF &gt; /var/lib/www/cgi-bin/hello.py
 import redis
 
 r = redis.Redis(
-                host='${database_host}',
+                host=&#39;${database_host}&#39;,
                 port=6379,
-                password='${database_pass}')
-r.set('count', 0)
+                password=&#39;${database_pass}&#39;)
+r.set(&#39;count&#39;, 0)
 count = r.incr(1)
 
-print(&quot;Content-type: text/html&quot;)
-print(&quot;&quot;)
-print(&quot;&lt;html&gt;&lt;body&gt;&quot;)
-print(&quot;&lt;p&gt;Hello World!&lt;br /&gt;counter: &quot; + str(count) + &quot;&lt;br /&gt;env: ${environment}&lt;/p&gt;&quot;)
-print(&quot;&lt;/body&gt;&lt;/html&gt;&quot;)
+print(&#34;Content-type: text/html&#34;)
+print(&#34;&#34;)
+print(&#34;&lt;html&gt;&lt;body&gt;&#34;)
+print(&#34;&lt;p&gt;Hello World!&lt;br /&gt;counter: &#34; + str(count) + &#34;&lt;br /&gt;env: ${environment}&lt;/p&gt;&#34;)
+print(&#34;&lt;/body&gt;&lt;/html&gt;&#34;)
 EOF
 
 chmod 755 /var/lib/www/cgi-bin/hello.py
 cd /var/lib/www
 sudo -u www python3 -m http.server 8000 --cgi
-</code></pre>
-
-<p>I use the module http.server of Python 3 for spinning up a web server,
+</code></pre><p>I use the module http.server of Python 3 for spinning up a web server,
 /var/lib/www/cgi-bin/hello.py is the cgi script which is executed.<br />
 I use the redis module for connecting to the Redis server, and whenever the cgi
 script is called, the count field will be incremented by 1.<br />
 The webserver serves the HTTP requests on port 8000.</p>
-
 <h2 id="deploying-the-infrastructure">Deploying the infrastructure</h2>
-
 <p>Export some environment variables:</p>
-
 <pre><code>$ export TF_VAR_region=&quot;eu-west-3&quot;
 $ export TF_VAR_bucket=&quot;yourbucket-terraform-state&quot;
 $ export TF_VAR_dev_network_key=&quot;terraform/dev/network/terraform.tfstate&quot;
@@ -396,9 +340,7 @@ $ export TF_VAR_dev_database_pass=&quot;pass_redis&quot;
 $ export TF_VAR_my_ip_address=$(curl -s 'https://duckduckgo.com/?q=ip&amp;t=h_&amp;ia=answer' \
 | sed -e 's/.*Your IP address is \([0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\) in.*/\1/')
 </code></pre>
-
 <p>building:</p>
-
 <pre><code>$ cd environments/dev
 $ cd 01-network
 $ terraform init \
@@ -419,9 +361,7 @@ $ terraform init \
     -backend-config=&quot;region=${TF_VAR_region}&quot;
 $ terraform apply
 </code></pre>
-
 <p>After finishing your test, destroy your infrastructure:</p>
-
 <pre><code>$ cd environments/dev
 $ cd 03-webserver
 $ terraform destroy
@@ -430,9 +370,7 @@ $ terraform destroy
 $ cd ../01-network
 $ terraform destroy
 </code></pre>
-
 <h2 id="summary">Summary</h2>
-
 <p>We have studied how to isolate some servers such as a database using a private
 subnet.<br />
 In the next tutorial we will add a bastion in our infrastructure.</p>
@@ -442,34 +380,35 @@ In the next tutorial we will add a bastion in our infrastructure.</p>
 </div>
     <footer>
       
-<script>
-(function() {
-  function center_el(tagName) {
-    var tags = document.getElementsByTagName(tagName), i, tag;
-    for (i = 0; i < tags.length; i++) {
-      tag = tags[i];
-      var parent = tag.parentElement;
       
-      if (parent.childNodes.length === 1) {
-        
-        if (parent.nodeName === 'A') {
-          parent = parent.parentElement;
-          if (parent.childNodes.length != 1) continue;
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
         }
-        if (parent.nodeName === 'P') parent.style.textAlign = 'center';
-      }
-    }
-  }
-  var tagNames = ['img', 'embed', 'object'];
-  for (var i = 0; i < tagNames.length; i++) {
-    center_el(tagNames[i]);
-  }
-})();
-</script>
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
 
       
       <hr/>
-      © 2021 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
       
     </footer>
   </body>
