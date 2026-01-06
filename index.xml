@@ -6,8 +6,15 @@
     <description>Recent content in Home on home</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Thu, 03 Jun 2021 19:24:14 +0000</lastBuildDate>
+    <lastBuildDate>Mon, 05 Jan 2026 21:14:27 +0100</lastBuildDate>
     <atom:link href="/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Automating Proxmox &amp; Ceph with Ansible</title>
+      <link>/post/2026/01/05/automating-proxmox-ceph-with-ansible/</link>
+      <pubDate>Mon, 05 Jan 2026 21:14:27 +0100</pubDate>
+      <guid>/post/2026/01/05/automating-proxmox-ceph-with-ansible/</guid>
+      <description>&lt;p&gt;Setting up a high-availability Proxmox VE (PVE) cluster with Ceph storage is a&#xA;rite of passage for many homelab enthusiasts. While the GUI is fantastic,&#xA;automating the process ensures reproducibility and saves time on rebuilds.&#xA;&lt;br /&gt;&#xA;In this post, I’ll walk through an Ansible playbook I wrote to configure a&#xA;3-node PVE cluster, deploy Ceph (including a specific partition setup for NVMe),&#xA;and prepare the system for Terraform/OpenTofu provisioning.&#xA;&lt;br /&gt;&#xA;You can find the full repository &lt;a href=&#34;https://github.com/richardpct/pve-homelab&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;</description>
+    </item>
     <item>
       <title>AWS with Terraform tutorial Gitlab</title>
       <link>/post/2021/06/03/aws-with-terraform-tutorial-gitlab/</link>
