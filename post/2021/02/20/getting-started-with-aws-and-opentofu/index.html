@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>Getting Started with AWS and OpenTofu | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">Getting Started with AWS and OpenTofu</span></h1>
+
+<h2 class="date">2021/02/20</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#what-you-will-build">What you will build</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#why-split-the-code-into-separate-stacks">Why split the code into separate stacks?</a></li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#prepare-your-variables">Prepare your variables</a></li>
+    <li><a href="#step-1--create-the-s3-bucket">Step 1 — Create the S3 bucket</a>
+      <ul>
+        <li></li>
+      </ul>
+    </li>
+    <li><a href="#step-2--create-the-network-stack">Step 2 — Create the network stack</a>
+      <ul>
+        <li></li>
+      </ul>
+    </li>
+    <li><a href="#step-3--create-the-webserver-stack">Step 3 — Create the webserver stack</a>
+      <ul>
+        <li></li>
+      </ul>
+    </li>
+    <li><a href="#step-4--install-nginx">Step 4 — Install Nginx</a></li>
+    <li><a href="#clean-up">Clean up</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>I will show you how to build a simple AWS infrastructure using OpenTofu (an open-source Terraform alternative) for your first steps with Infrastructure as Code.</p>
+<p>The example I have chosen is based on <a href="https://docs.aws.amazon.com/vpc/latest/userguide/get-started-ipv6.html">the Getting Started with IPv6 for Amazon VPC</a>. By the end of this tutorial, you will have created an EC2 instance running a web server, fully deployed and managed through code.</p>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto01">GitHub repository</a>.</p>
+<h2 id="what-you-will-build">What you will build</h2>
+<p>You will learn how to create:</p>
+<ul>
+<li>An S3 bucket for storing OpenTofu state</li>
+<li>A VPC with a public subnet</li>
+<li>An Internet Gateway and a route table</li>
+<li>Security groups defining firewall rules (SSH and HTTP)</li>
+<li>An EC2 instance using an Amazon Linux image</li>
+<li>An Elastic IP for a stable public address</li>
+<li>An SSH key pair for connecting to the instance</li>
+</ul>
+<h2 id="architecture-overview">Architecture overview</h2>
+<p>The following diagram shows the overall infrastructure you will deploy:</p>
+<pre class="mermaid">
+  graph TB
+    Internet((Internet))
+
+    subgraph AWS[AWS Cloud - eu-west-3]
+        IGW[Internet Gateway]
+
+        subgraph VPC[VPC 10.0.0.0/16]
+            subgraph PublicSubnet[Public Subnet 10.0.0.0/24]
+                EC2[EC2 Instance&lt;br/&gt;Amazon Linux 2023&lt;br/&gt;t2.micro]
+                SG[Security Group&lt;br/&gt;Inbound: SSH 22, HTTP 80&lt;br/&gt;Outbound: All]
+            end
+            RT[Route Table&lt;br/&gt;10.0.0.0/16 → local&lt;br/&gt;0.0.0.0/0 → IGW]
+        end
+
+        EIP[Elastic IP]
+    end
+
+    S3[S3 Bucket&lt;br/&gt;OpenTofu State]
+
+    Internet &lt;--&gt; EIP
+    EIP &lt;--&gt; EC2
+    Internet &lt;--&gt; IGW
+    IGW &lt;--&gt; PublicSubnet
+    RT -.- PublicSubnet
+    SG -.- EC2
+</pre>
+
+<h2 id="why-split-the-code-into-separate-stacks">Why split the code into separate stacks?</h2>
+<p>Rather than putting all Terraform code in a single directory, this project is split into three independent stacks: <strong>bucket</strong>, <strong>network</strong>, and <strong>webserver</strong>. Each stack manages its own state and can be deployed or destroyed independently.</p>
+<p>This matters because if you need to change the instance type, you only destroy and rebuild the webserver stack — the network remains untouched. This saves time, reduces risk, and mirrors how real production infrastructure is organized.</p>
+<p>The stacks share data through the S3 bucket. The network stack exports its VPC ID and subnet ID to the remote state, and the webserver stack reads them:</p>
+<pre class="mermaid">
+  graph LR
+    subgraph Stack 1
+        NET[01-network&lt;br/&gt;VPC, Subnet, IGW,&lt;br/&gt;Route Table]
+    end
+
+    subgraph Remote State
+        S3[(S3 Bucket&lt;br/&gt;terraform.tfstate)]
+    end
+
+    subgraph Stack 2
+        WEB[02-webserver&lt;br/&gt;EC2, Security Groups,&lt;br/&gt;Elastic IP]
+    end
+
+    NET -- &#34;outputs:&lt;br/&gt;vpc_id&lt;br/&gt;subnet_public_id&#34; --&gt; S3
+    S3 -- &#34;terraform_remote_state&lt;br/&gt;reads vpc_id &amp;&lt;br/&gt;subnet_public_id&#34; --&gt; WEB
+</pre>
+
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>aws-terraform-tuto01/
+├── 00-bucket/          # S3 bucket for OpenTofu state (deployed first)
+│   ├── main.tf
+│   ├── Makefile
+│   ├── providers.tf
+│   ├── variables.tf
+│   └── versions.tf
+├── 01-network/         # VPC, subnet, Internet Gateway, route table
+│   ├── backends.tf
+│   ├── main.tf
+│   ├── Makefile
+│   ├── outputs.tf
+│   ├── providers.tf
+│   ├── variables.tf
+│   └── versions.tf
+└── 02-webserver/       # EC2 instance, security groups, Elastic IP
+    ├── backends.tf
+    ├── main.tf
+    ├── Makefile
+    ├── outputs.tf
+    ├── providers.tf
+    ├── variables.tf
+    └── versions.tf
+</code></pre><p>Each directory contains a <code>Makefile</code> that wraps the <code>tofu init</code>, <code>tofu apply</code>, and <code>tofu destroy</code> commands, automatically sourcing your secret environment variables.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>You must create a regular user in the IAM management console with appropriate permissions — avoid using the root account.</li>
+<li>You must configure your AWS credentials on your local machine (e.g., via <code>~/.aws/config</code> and <code>~/.aws/credentials</code>) so that OpenTofu can authenticate with the AWS API.</li>
+<li>You must install the latest OpenTofu version (1.11.x or higher).</li>
+</ul>
+<h2 id="prepare-your-variables">Prepare your variables</h2>
+<p>Create a file at <code>~/terraform/aws-terraform-tuto01/terraform_vars_secrets</code> with the following content:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-01/dev/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_webserver<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-01/dev/webserver/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 AAAAXXXX&#34;</span>
+</span></span></code></pre></div><p>Replace <code>XXXX-tofu-state</code> with a globally unique bucket name, and paste your actual SSH public key. The <code>TF_VAR_</code> prefix tells OpenTofu to map these environment variables to Terraform variables automatically.</p>
+<h2 id="step-1--create-the-s3-bucket">Step 1 — Create the S3 bucket</h2>
+<p>OpenTofu needs to store the state of your infrastructure somewhere. You could store it locally, but that means only you can access it. By using an S3 bucket, your coworkers can collaborate on the same infrastructure. This bucket should never be deleted as long as you use OpenTofu with AWS.</p>
+<h4 id="00-bucketmaintf">00-bucket/main.tf</h4>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_s3_bucket&#34; &#34;tutos&#34;</span> {
+</span></span><span style="display:flex;"><span>  bucket        <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">bucket</span>
+</span></span><span style="display:flex;"><span>  force_destroy <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_s3_bucket_ownership_controls&#34; &#34;tutos&#34;</span> {
+</span></span><span style="display:flex;"><span>  bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_s3_bucket</span>.<span style="color:#66d9ef">tutos</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">rule</span> {
+</span></span><span style="display:flex;"><span>    object_ownership <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;BucketOwnerPreferred&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_s3_bucket_versioning&#34; &#34;tutos&#34;</span> {
+</span></span><span style="display:flex;"><span>  bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_s3_bucket</span>.<span style="color:#66d9ef">tutos</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">versioning_configuration</span> {
+</span></span><span style="display:flex;"><span>    status <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;Enabled&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This creates an S3 bucket with versioning enabled, which protects against accidental state corruption. The <code>force_destroy = true</code> flag allows the bucket to be cleaned up even if it still contains objects. The <code>BucketOwnerPreferred</code> ownership control ensures consistent permissions.</p>
+<h4 id="00-bucketvariablestf">00-bucket/variables.tf</h4>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;region&#34;</span> {
+</span></span><span style="display:flex;"><span>  type        <span style="color:#f92672">=</span> <span style="color:#66d9ef">string</span>
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;region&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;bucket&#34;</span> {
+</span></span><span style="display:flex;"><span>  type        <span style="color:#f92672">=</span> <span style="color:#66d9ef">string</span>
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;bucket&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The values are not set here with <code>default</code> — instead, they come from the <code>TF_VAR_</code> environment variables defined in your secrets file. This avoids committing sensitive data to your Git repository.</p>
+<h4 id="00-bucketversionstf">00-bucket/versions.tf</h4>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">terraform</span> {
+</span></span><span style="display:flex;"><span>  required_version <span style="color:#f92672">=</span> &#34;&gt;<span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>.<span style="color:#ae81ff">11</span>.<span style="color:#ae81ff">5</span><span style="color:#960050;background-color:#1e0010">&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This enforces a minimum OpenTofu version to avoid compatibility issues.</p>
+<h4 id="deploy-the-bucket">Deploy the bucket</h4>
+<p>Initialize and apply:</p>
+<pre><code>$ cd 00-bucket
+$ make init
+$ make apply
+</code></pre>
+<p>This creates a local <code>terraform.tfstate</code> file — this is the only stack where state is stored locally, since the bucket doesn&rsquo;t exist yet. From now on, all other stacks will store their state remotely in this bucket.</p>
+<h2 id="step-2--create-the-network-stack">Step 2 — Create the network stack</h2>
+<p>The network stack sets up the foundational AWS networking: a VPC, a public subnet, an Internet Gateway, and a route table that sends all outbound traffic through the gateway.</p>
+<h4 id="01-networkbackendstf">01-network/backends.tf</h4>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">terraform</span> {
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">backend</span> <span style="color:#e6db74">&#34;s3&#34;</span> {
+</span></span><span style="display:flex;"><span>    bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">bucket</span>
+</span></span><span style="display:flex;"><span>    key    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">key_network</span>
+</span></span><span style="display:flex;"><span>    region <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This tells OpenTofu to store the network stack&rsquo;s state in the S3 bucket created in Step 1, under the key path <code>tuto-01/dev/network/terraform.tfstate</code>.</p>
+<h4 id="01-networkmaintf">01-network/main.tf</h4>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_vpc&#34; &#34;my_vpc&#34;</span> {
+</span></span><span style="display:flex;"><span>  cidr_block <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">vpc_cidr_block</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;my_vpc&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This creates a VPC with the CIDR block <code>10.0.0.0/16</code>, giving you 65,536 private IP addresses to work with.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_internet_gateway&#34; &#34;my_igw&#34;</span> {
+</span></span><span style="display:flex;"><span>  vpc_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;my_igw&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The Internet Gateway is the bridge between your VPC and the public internet. Without it, nothing inside the VPC can reach the outside world.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_subnet&#34; &#34;public&#34;</span> {
+</span></span><span style="display:flex;"><span>  vpc_id     <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  cidr_block <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_public</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;subnet_public&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This carves out a <code>/24</code> subnet (256 addresses) from the VPC. It will become a &ldquo;public&rdquo; subnet once we route its traffic through the Internet Gateway.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_default_route_table&#34; &#34;route&#34;</span> {
+</span></span><span style="display:flex;"><span>  default_route_table_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">default_route_table_id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">route</span> {
+</span></span><span style="display:flex;"><span>    cidr_block <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>
+</span></span><span style="display:flex;"><span>    gateway_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_internet_gateway</span>.<span style="color:#66d9ef">my_igw</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;default route&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_route_table_association&#34; &#34;public&#34;</span> {
+</span></span><span style="display:flex;"><span>  subnet_id      <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">public</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  route_table_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_default_route_table</span>.<span style="color:#66d9ef">route</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The default route (<code>0.0.0.0/0</code>) sends all non-local traffic to the Internet Gateway. Associating this route table with the subnet is what makes it a public subnet — instances inside it can both reach the internet and be reached from the internet (subject to security group rules).</p>
+<p>The resulting route table contains:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Destination</th>
+          <th>Target</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>10.0.0.0/16</td>
+          <td>local</td>
+      </tr>
+      <tr>
+          <td>0.0.0.0/0</td>
+          <td>Internet Gateway</td>
+      </tr>
+  </tbody>
+</table>
+<h4 id="01-networkoutputstf">01-network/outputs.tf</h4>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;vpc_id&#34;</span> {
+</span></span><span style="display:flex;"><span>  value       <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;vpc id&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;subnet_public_id&#34;</span> {
+</span></span><span style="display:flex;"><span>  value       <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">public</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;subnet public id&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>These outputs are critical: they export the VPC ID and subnet ID to the remote state in S3, so that the webserver stack can reference them without hardcoding any IDs.</p>
+<h4 id="deploy-the-network">Deploy the network</h4>
+<pre><code>$ cd ../01-network
+$ make init
+$ make apply
+</code></pre>
+<h2 id="step-3--create-the-webserver-stack">Step 3 — Create the webserver stack</h2>
+<p>This stack creates the EC2 instance with all its dependencies: an SSH key pair, security groups for firewall rules, and an Elastic IP for a stable public address.</p>
+<h4 id="02-webserverbackendstf">02-webserver/backends.tf</h4>
+<p>The webserver stack reads the network stack&rsquo;s outputs from S3 using <code>terraform_remote_state</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">data</span> <span style="color:#e6db74">&#34;terraform_remote_state&#34; &#34;network&#34;</span> {
+</span></span><span style="display:flex;"><span>  backend <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;s3&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  config <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">bucket</span>
+</span></span><span style="display:flex;"><span>    key    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">key_network</span>
+</span></span><span style="display:flex;"><span>    region <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This is how stacks communicate: the network stack wrote <code>vpc_id</code> and <code>subnet_public_id</code> to S3, and the webserver stack reads them back with <code>data.terraform_remote_state.network.outputs.vpc_id</code>.</p>
+<h4 id="02-webservermaintf">02-webserver/main.tf</h4>
+<p><strong>SSH key pair</strong> — uploads your public key to AWS so you can SSH into the instance:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_key_pair&#34; &#34;deployer&#34;</span> {
+</span></span><span style="display:flex;"><span>  key_name   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;deployer-key&#34;</span>
+</span></span><span style="display:flex;"><span>  public_key <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">ssh_public_key</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p><strong>Security group</strong> — a virtual firewall attached to the instance. It is associated with the VPC created by the network stack:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group&#34; &#34;webserver&#34;</span> {
+</span></span><span style="display:flex;"><span>  name   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;sg_webserver&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">vpc_id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;webserver sg&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p><strong>Firewall rules</strong> — three rules define what traffic is allowed:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;inbound_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#ae81ff">22</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#ae81ff">22</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>]
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;inbound_http&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#ae81ff">80</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#ae81ff">80</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>]
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;outbound_all&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;egress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#ae81ff">0</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#ae81ff">0</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;-1&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>]
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The first rule allows SSH access (port 22) from anywhere. In a production environment, you would restrict this to your own IP address. The second rule allows HTTP traffic (port 80) from anywhere — this is how users will reach your web server. The third rule allows all outbound traffic, so the instance can download packages and updates.</p>
+<p>The security group rules can be visualized as:</p>
+<pre class="mermaid">
+  graph LR
+    World((Internet))
+
+    subgraph SG[Security Group]
+        EC2[EC2 Instance]
+    end
+
+    World -- &#34;TCP 22 SSH&#34; --&gt; EC2
+    World -- &#34;TCP 80 HTTP&#34; --&gt; EC2
+    EC2 -- &#34;All outbound&#34; --&gt; World
+</pre>
+
+<p><strong>EC2 instance</strong> — the virtual machine itself:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_instance&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  ami                    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">image_id</span>
+</span></span><span style="display:flex;"><span>  instance_type          <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">instance_type</span>
+</span></span><span style="display:flex;"><span>  key_name               <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_key_pair</span>.<span style="color:#66d9ef">deployer</span>.<span style="color:#66d9ef">key_name</span>
+</span></span><span style="display:flex;"><span>  subnet_id              <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_public_id</span>
+</span></span><span style="display:flex;"><span>  vpc_security_group_ids <span style="color:#f92672">=</span> [<span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>]
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;web server&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This launches a <code>t2.micro</code> instance (free tier eligible) running Amazon Linux 2023. It is placed in the public subnet and protected by the security group. The SSH key is injected so you can connect to it.</p>
+<p><strong>Elastic IP</strong> — a static public IP address attached to the instance:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_eip&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  instance <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_instance</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  domain   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;vpc&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Without an Elastic IP, your instance would get a random public IP that changes every time the instance stops and starts. The Elastic IP gives you a stable address.</p>
+<h4 id="02-webserveroutputstf">02-webserver/outputs.tf</h4>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;public_ip&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;public ip&#34;</span>
+</span></span><span style="display:flex;"><span>  value       <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_eip</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">public_ip</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>After deployment, this displays the public IP address you can use to connect to your server.</p>
+<h4 id="deploy-the-webserver">Deploy the webserver</h4>
+<pre><code>$ cd ../02-webserver
+$ make init
+$ make apply
+</code></pre>
+<p>The output will display something like:</p>
+<pre tabindex="0"><code>Outputs:
+
+public_ip = &#34;35.180.xx.xx&#34;
+</code></pre><h2 id="step-4--install-nginx">Step 4 — Install Nginx</h2>
+<p>Wait a few seconds for the instance to boot, then connect via SSH using the Elastic IP from the output:</p>
+<pre><code>$ ssh ec2-user@xx.xx.xx.xx
+</code></pre>
+<p>Once connected, install and start Nginx:</p>
+<pre><code>$ sudo su -
+# yum update
+# yum install nginx
+# systemctl start nginx
+</code></pre>
+<p>Now open your web browser and navigate to <code>http://xx.xx.xx.xx</code> — you should see the default Nginx welcome page. Congratulations, your web server is live!</p>
+<h2 id="clean-up">Clean up</h2>
+<p>When you are done, destroy the infrastructure in reverse order:</p>
+<pre><code>$ cd 02-webserver
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<p>You do not need to destroy the S3 bucket — you will reuse it in future tutorials for storing OpenTofu state.</p>
+<h2 id="summary">Summary</h2>
+<p>Congratulations if you have followed this tutorial to the end! You have learned how to use OpenTofu to deploy a complete AWS infrastructure from scratch — a VPC with networking, an EC2 instance with firewall rules, and a web server accessible from the internet.</p>
+<p>More importantly, you have seen how to organize your code into independent stacks that communicate through remote state in S3. This pattern scales well: you can modify or rebuild one layer without touching the others.</p>
+<p>In the next tutorial, I will show you how to organize your code even better using Terraform modules for reusability.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+

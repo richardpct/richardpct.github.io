@@ -79,11 +79,11 @@
       <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial takes up the previous one in improving our code by using the&#xA;modules. A module in Terraform acts like a funtion in a programming language,&#xA;and like a function we can provide some parameters.&lt;br /&gt;&#xA;It is a good practice to work with, and you know the famous adage in computer&#xA;science? &amp;ldquo;Don&amp;rsquo;t repeat yourself!&amp;rdquo;.&lt;br /&gt;&lt;/p&gt;&#xA;&lt;p&gt;The source code is available on my &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto02&#34;&gt;Github repository&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;h2 id=&#34;create-modules-in-terraform&#34;&gt;Create modules in Terraform&lt;/h2&gt;&#xA;&lt;p&gt;Here is the new layout of our Terraform files located in our file system:&lt;/p&gt;</description>
     </item>
     <item>
-      <title>AWS with Terraform tutorial 01</title>
-      <link>/post/2021/02/20/aws-with-terraform-tutorial-01/</link>
-      <pubDate>Sat, 20 Feb 2021 15:11:25 +0000</pubDate>
-      <guid>/post/2021/02/20/aws-with-terraform-tutorial-01/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;I will show you how to build a simple AWS example using Terraform for your&#xA;first steps.&lt;br /&gt;&#xA;The example that I have chosen is &lt;a href=&#34;https://docs.aws.amazon.com/vpc/latest/userguide/get-started-ipv6.html&#34;&gt;the Getting Started with IPv6 for Amazon VPC&lt;/a&gt;,&#xA;you will able to create a EC2 instance in AWS which we will spin up a web service.&lt;/p&gt;&#xA;&lt;p&gt;You will learn how to create:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;A S3 bucket&lt;/li&gt;&#xA;&lt;li&gt;A VPC&lt;/li&gt;&#xA;&lt;li&gt;A public subnet&lt;/li&gt;&#xA;&lt;li&gt;A EC2 using an Amazon Linux image&lt;/li&gt;&#xA;&lt;li&gt;A Internet Gateway&lt;/li&gt;&#xA;&lt;li&gt;A Elastic IP&lt;/li&gt;&#xA;&lt;li&gt;A route table&lt;/li&gt;&#xA;&lt;li&gt;Some security groups to define the firewall rules&lt;/li&gt;&#xA;&lt;li&gt;A SSH key for connecting to the EC2&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;The following figure shows you an overview of what you will build:&lt;/p&gt;</description>
+      <title>Getting Started with AWS and OpenTofu</title>
+      <link>/post/2021/02/20/getting-started-with-aws-and-opentofu/</link>
+      <pubDate>Sat, 20 Feb 2021 00:00:00 +0000</pubDate>
+      <guid>/post/2021/02/20/getting-started-with-aws-and-opentofu/</guid>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;I will show you how to build a simple AWS infrastructure using OpenTofu (an open-source Terraform alternative) for your first steps with Infrastructure as Code.&lt;/p&gt;&#xA;&lt;p&gt;The example I have chosen is based on &lt;a href=&#34;https://docs.aws.amazon.com/vpc/latest/userguide/get-started-ipv6.html&#34;&gt;the Getting Started with IPv6 for Amazon VPC&lt;/a&gt;. By the end of this tutorial, you will have created an EC2 instance running a web server, fully deployed and managed through code.&lt;/p&gt;&#xA;&lt;p&gt;The full source code is available on my &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto01&#34;&gt;GitHub repository&lt;/a&gt;.&lt;/p&gt;</description>
     </item>
   </channel>
 </rss>

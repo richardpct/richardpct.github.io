@@ -38,11 +38,25 @@
     <loc>/post/2021/03/04/aws-with-terraform-tutorial-02/</loc>
     <lastmod>2021-03-04T19:42:41+00:00</lastmod>
   </url><url>
-    <loc>/post/2021/02/20/aws-with-terraform-tutorial-01/</loc>
-    <lastmod>2021-02-20T15:11:25+00:00</lastmod>
+    <loc>/tags/aws/</loc>
+    <lastmod>2021-02-20T00:00:00+00:00</lastmod>
   </url><url>
     <loc>/categories/</loc>
+    <lastmod>2021-02-20T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/post/2021/02/20/getting-started-with-aws-and-opentofu/</loc>
+    <lastmod>2021-02-20T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/opentofu/</loc>
+    <lastmod>2021-02-20T00:00:00+00:00</lastmod>
   </url><url>
     <loc>/tags/</loc>
+    <lastmod>2021-02-20T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/terraform/</loc>
+    <lastmod>2021-02-20T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/categories/tutorial/</loc>
+    <lastmod>2021-02-20T00:00:00+00:00</lastmod>
   </url>
 </urlset>
