@@ -6,8 +6,15 @@
     <description>Recent content in Opentofu on home</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Sat, 20 Feb 2021 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Thu, 04 Mar 2021 00:00:00 +0000</lastBuildDate>
     <atom:link href="/tags/opentofu/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>AWS with OpenTofu: Refactoring with Modules</title>
+      <link>/post/2021/03/04/aws-with-opentofu-refactoring-with-modules/</link>
+      <pubDate>Thu, 04 Mar 2021 00:00:00 +0000</pubDate>
+      <guid>/post/2021/03/04/aws-with-opentofu-refactoring-with-modules/</guid>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial builds on &lt;a href=&#34;https://richardpct.github.io/post/2021/02/20/getting-started-with-aws-and-opentofu/&#34;&gt;the previous one&lt;/a&gt; where we deployed a web server on AWS using OpenTofu. The infrastructure we built works, but all the resource definitions live directly in the stack directories. If we wanted to create a second environment (staging, production), we would have to copy-paste all that code — and as any developer knows, that&amp;rsquo;s a recipe for bugs and drift.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we refactor the code by introducing &lt;strong&gt;modules&lt;/strong&gt;. A module in OpenTofu works like a function in a programming language: it encapsulates a reusable piece of infrastructure and accepts parameters. You write it once, and call it as many times as you need with different values.&lt;/p&gt;</description>
+    </item>
     <item>
       <title>Getting Started with AWS and OpenTofu</title>
       <link>/post/2021/02/20/getting-started-with-aws-and-opentofu/</link>

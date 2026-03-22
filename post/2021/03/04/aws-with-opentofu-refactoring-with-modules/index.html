@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with OpenTofu: Refactoring with Modules | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">AWS with OpenTofu: Refactoring with Modules</span></h1>
+
+<h2 class="date">2021/03/04</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/modules">modules</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#what-changes-from-tutorial-01">What changes from tutorial 01?</a></li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#how-modules-work">How modules work</a></li>
+    <li><a href="#the-network-module">The network module</a></li>
+    <li><a href="#the-webserver-module">The webserver module</a></li>
+    <li><a href="#the-callers">The callers</a></li>
+    <li><a href="#deploy-your-infrastructure">Deploy your infrastructure</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>This tutorial builds on <a href="https://richardpct.github.io/post/2021/02/20/getting-started-with-aws-and-opentofu/">the previous one</a> where we deployed a web server on AWS using OpenTofu. The infrastructure we built works, but all the resource definitions live directly in the stack directories. If we wanted to create a second environment (staging, production), we would have to copy-paste all that code — and as any developer knows, that&rsquo;s a recipe for bugs and drift.</p>
+<p>In this tutorial, we refactor the code by introducing <strong>modules</strong>. A module in OpenTofu works like a function in a programming language: it encapsulates a reusable piece of infrastructure and accepts parameters. You write it once, and call it as many times as you need with different values.</p>
+<p>As the famous adage in computer science says: <strong>&ldquo;Don&rsquo;t Repeat Yourself!&rdquo;</strong></p>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto02">GitHub repository</a>.</p>
+<h2 id="what-changes-from-tutorial-01">What changes from tutorial 01?</h2>
+<p>The AWS infrastructure we deploy is exactly the same — a VPC, a public subnet, an EC2 instance running Nginx, behind an Elastic IP. What changes is how the code is organized.</p>
+<p>In <a href="https://richardpct.github.io/post/2021/02/20/getting-started-with-aws-and-opentofu/">tutorial 01</a>, the resource definitions lived directly inside the <code>01-network/main.tf</code> and <code>02-webserver/main.tf</code> files. In this tutorial, those resources are extracted into reusable modules, and the stack files simply call the modules with parameters:</p>
+<pre class="mermaid">
+  graph LR
+    subgraph &#34;Tutorial 01 — Resources inline&#34;
+        A1[01-network/main.tf&lt;br/&gt;VPC, Subnet, IGW,&lt;br/&gt;Route Table defined here]
+        A2[02-webserver/main.tf&lt;br/&gt;EC2, SG, EIP&lt;br/&gt;defined here]
+    end
+</pre>
+
+<pre class="mermaid">
+  graph LR
+    subgraph &#34;Tutorial 02 — Using modules&#34;
+        B1[01-network/main.tf&lt;br/&gt;calls module with params] --&gt; M1[modules/network/&lt;br/&gt;VPC, Subnet, IGW,&lt;br/&gt;Route Table]
+        B2[02-webserver/main.tf&lt;br/&gt;calls module with params] --&gt; M2[modules/webserver/&lt;br/&gt;EC2, SG, EIP]
+    end
+</pre>
+
+<p>The benefit becomes clear when you need multiple environments: instead of duplicating resource definitions, you create a new caller directory (e.g., <code>01-network-staging/</code>) that invokes the same module with different parameters (a different CIDR block, a different instance type, etc.).</p>
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>aws-terraform-tuto02/
+├── modules/                  # Reusable module definitions
+│   ├── network/              # Network module: VPC, subnet, IGW, routes
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   └── webserver/            # Webserver module: EC2, SG, EIP
+│       ├── main.tf
+│       ├── outputs.tf
+│       ├── providers.tf
+│       └── variables.tf
+├── 01-network/               # Module caller for the network stack
+│   ├── backends.tf
+│   ├── main.tf
+│   ├── Makefile
+│   ├── outputs.tf
+│   ├── variables.tf
+│   └── versions.tf
+└── 02-webserver/             # Module caller for the webserver stack
+    ├── backends.tf
+    ├── main.tf
+    ├── Makefile
+    ├── outputs.tf
+    ├── variables.tf
+    └── versions.tf
+</code></pre><p>The key distinction is the separation between <strong>modules</strong> (reusable building blocks in <code>modules/</code>) and <strong>callers</strong> (concrete instances in <code>01-network/</code> and <code>02-webserver/</code> that invoke those modules with specific values).</p>
+<h2 id="how-modules-work">How modules work</h2>
+<p>A module is just a directory containing regular OpenTofu files (<code>.tf</code>). It declares variables as its inputs, resources as its logic, and outputs as its return values. The caller references the module via <code>source</code> and passes values for each variable.</p>
+<p>Here is how the data flows:</p>
+<pre class="mermaid">
+  graph TD
+    subgraph Caller[&#34;01-network/main.tf (caller)&#34;]
+        CALL[&#34;module &#39;network&#39;&lt;br/&gt;source = &#39;../modules/network&#39;&lt;br/&gt;region = &#39;eu-west-3&#39;&lt;br/&gt;vpc_cidr_block = &#39;10.0.0.0/16&#39;&lt;br/&gt;subnet_public = &#39;10.0.0.0/24&#39;&#34;]
+    end
+
+    subgraph Module[&#34;modules/network/ (module)&#34;]
+        VARS[variables.tf&lt;br/&gt;var.region&lt;br/&gt;var.vpc_cidr_block&lt;br/&gt;var.subnet_public]
+        RES[main.tf&lt;br/&gt;aws_vpc&lt;br/&gt;aws_subnet&lt;br/&gt;aws_internet_gateway&lt;br/&gt;aws_route_table]
+        OUT[outputs.tf&lt;br/&gt;vpc_id&lt;br/&gt;subnet_public_id]
+        VARS --&gt; RES --&gt; OUT
+    end
+
+    subgraph CallerOut[&#34;01-network/outputs.tf&#34;]
+        COUT[&#34;module.network.vpc_id&lt;br/&gt;module.network.subnet_public_id&#34;]
+    end
+
+    CALL --&gt; VARS
+    OUT --&gt; COUT
+</pre>
+
+<p>The caller passes parameters in, the module creates the resources, and the outputs bubble back up to the caller where they are re-exported to the S3 remote state.</p>
+<h2 id="the-network-module">The network module</h2>
+<p><strong>modules/network/variables.tf</strong></p>
+<p>The module declares its inputs — what the caller must provide:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;region&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;region&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;vpc_cidr_block&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;vpc cidr block&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;subnet_public&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;public subnet&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Notice there are no <code>default</code> values here. This is intentional: the module is generic and doesn&rsquo;t assume any particular configuration. The caller decides the region, the CIDR block, and the subnet range.</p>
+<p><strong>modules/network/main.tf</strong></p>
+<p>The resource definitions are identical to what we had in tutorial 01, but now they live inside the module:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_vpc&#34; &#34;my_vpc&#34;</span> {
+</span></span><span style="display:flex;"><span>  cidr_block <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">vpc_cidr_block</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;my_vpc&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_internet_gateway&#34; &#34;my_igw&#34;</span> {
+</span></span><span style="display:flex;"><span>  vpc_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;my_igw&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_subnet&#34; &#34;public&#34;</span> {
+</span></span><span style="display:flex;"><span>  vpc_id     <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  cidr_block <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_public</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;subnet_public&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_default_route_table&#34; &#34;route&#34;</span> {
+</span></span><span style="display:flex;"><span>  default_route_table_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">default_route_table_id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">route</span> {
+</span></span><span style="display:flex;"><span>    cidr_block <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>
+</span></span><span style="display:flex;"><span>    gateway_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_internet_gateway</span>.<span style="color:#66d9ef">my_igw</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;default route&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_route_table_association&#34; &#34;public&#34;</span> {
+</span></span><span style="display:flex;"><span>  subnet_id      <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">public</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  route_table_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_default_route_table</span>.<span style="color:#66d9ef">route</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Nothing new here — this is the same VPC, subnet, Internet Gateway, and route table from the previous tutorial. The difference is that these resources are now parameterized through variables rather than hardcoded.</p>
+<p><strong>modules/network/outputs.tf</strong></p>
+<p>The module exports the IDs that other stacks will need:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;vpc_id&#34;</span> {
+</span></span><span style="display:flex;"><span>  value <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;subnet_public_id&#34;</span> {
+</span></span><span style="display:flex;"><span>  value <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">public</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="the-webserver-module">The webserver module</h2>
+<p><strong>modules/webserver/variables.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;region&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;region&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;network_remote_state_bucket&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;bucket&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;network_remote_state_key&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;network key&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;image_id&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;image id&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;instance_type&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;instance type&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">variable</span> <span style="color:#e6db74">&#34;ssh_public_key&#34;</span> {
+</span></span><span style="display:flex;"><span>  description <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ssh public key&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The webserver module takes the S3 bucket name and the network state key as inputs, so it can look up the VPC and subnet IDs from the network stack&rsquo;s remote state.</p>
+<p><strong>modules/webserver/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">data</span> <span style="color:#e6db74">&#34;terraform_remote_state&#34; &#34;network&#34;</span> {
+</span></span><span style="display:flex;"><span>  backend <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;s3&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  config <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">network_remote_state_bucket</span>
+</span></span><span style="display:flex;"><span>    key    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">network_remote_state_key</span>
+</span></span><span style="display:flex;"><span>    region <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_key_pair&#34; &#34;deployer&#34;</span> {
+</span></span><span style="display:flex;"><span>  key_name   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;deployer-key&#34;</span>
+</span></span><span style="display:flex;"><span>  public_key <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">ssh_public_key</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group&#34; &#34;webserver&#34;</span> {
+</span></span><span style="display:flex;"><span>  name   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;sg_webserver&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">vpc_id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;webserver sg&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;inbound_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#ae81ff">22</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#ae81ff">22</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>]
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;inbound_http&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#ae81ff">80</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#ae81ff">80</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>]
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;outbound_all&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;egress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#ae81ff">0</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#ae81ff">0</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;-1&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>]
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_instance&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  ami                    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">image_id</span>
+</span></span><span style="display:flex;"><span>  instance_type          <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">instance_type</span>
+</span></span><span style="display:flex;"><span>  key_name               <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_key_pair</span>.<span style="color:#66d9ef">deployer</span>.<span style="color:#66d9ef">key_name</span>
+</span></span><span style="display:flex;"><span>  subnet_id              <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_public_id</span>
+</span></span><span style="display:flex;"><span>  vpc_security_group_ids <span style="color:#f92672">=</span> [<span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>]
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;web server&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_eip&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  instance <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_instance</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  domain   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;vpc&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Again, this is the same code from tutorial 01. The key difference is that values like <code>instance_type</code>, <code>image_id</code>, and <code>ssh_public_key</code> are now passed in by the caller instead of being defined with <code>default</code> values in the variables file. This makes the module reusable across environments — you could call it with <code>t2.micro</code> for dev and <code>t3.large</code> for production.</p>
+<p><strong>modules/webserver/outputs.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;public_ip&#34;</span> {
+</span></span><span style="display:flex;"><span>  value <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_eip</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">public_ip</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="the-callers">The callers</h2>
+<p>The caller files are now much simpler — they just invoke the module and pass parameters.</p>
+<p><strong>01-network/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;network&#34;</span> {
+</span></span><span style="display:flex;"><span>  source <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../modules/network&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  region         <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_cidr_block <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.0.0/16&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_public  <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.0.0/24&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>source</code> attribute points to the module directory. Then each variable the module expects is set with a concrete value. This is the entire <code>main.tf</code> — compare that to the dozen resources we had directly here in tutorial 01.</p>
+<p><strong>01-network/outputs.tf</strong></p>
+<p>The caller must re-export the module&rsquo;s outputs so they are available in the remote state:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;vpc_id&#34;</span> {
+</span></span><span style="display:flex;"><span>  value <span style="color:#f92672">=</span> <span style="color:#66d9ef">module</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">vpc_id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;subnet_public_id&#34;</span> {
+</span></span><span style="display:flex;"><span>  value <span style="color:#f92672">=</span> <span style="color:#66d9ef">module</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">subnet_public_id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Note the syntax <code>module.network.vpc_id</code> — this references the output named <code>vpc_id</code> from the module named <code>network</code>.</p>
+<p><strong>02-webserver/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;webserver&#34;</span> {
+</span></span><span style="display:flex;"><span>  source <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../modules/webserver&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  region                      <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">bucket</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_key    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">key_network</span>
+</span></span><span style="display:flex;"><span>  instance_type               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;t2.micro&#34;</span>
+</span></span><span style="display:flex;"><span>  image_id                    <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ami-00235772425cbf8ac&#34;</span> <span style="color:#960050;background-color:#1e0010">//</span> <span style="color:#66d9ef">amazon</span> <span style="color:#66d9ef">linux</span> <span style="color:#ae81ff">2023</span>
+</span></span><span style="display:flex;"><span>  ssh_public_key              <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">ssh_public_key</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Some values are hardcoded (region, instance type, AMI), while others come from environment variables via <code>var.bucket</code>, <code>var.key_network</code>, and <code>var.ssh_public_key</code>. This is a common pattern: values that differ between environments are passed through variables, while values that are fixed for this particular deployment are set inline.</p>
+<p><strong>02-webserver/outputs.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;public_ip&#34;</span> {
+</span></span><span style="display:flex;"><span>  value <span style="color:#f92672">=</span> <span style="color:#66d9ef">module</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">public_ip</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="deploy-your-infrastructure">Deploy your infrastructure</h2>
+<p><strong>Prepare your variables</strong></p>
+<p>Create a file at <code>~/terraform/aws-terraform-tuto02/terraform_vars_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-02/dev/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_webserver<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-02/dev/webserver/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 AAAAXXXX&#34;</span>
+</span></span></code></pre></div><p>Note: this tutorial reuses the S3 bucket created in tutorial 01. The state keys use <code>tuto-02/</code> as a prefix to keep them separate.</p>
+<p><strong>Deploy</strong></p>
+<p>Build the network stack, then the webserver stack:</p>
+<pre><code>$ cd 01-network
+$ make apply
+$ cd ../02-webserver
+$ make apply
+</code></pre>
+<p><strong>Install Nginx</strong></p>
+<p>Connect to the instance using the Elastic IP displayed in the output:</p>
+<pre><code>$ ssh ec2-user@xx.xx.xx.xx
+$ sudo su -
+# yum update
+# yum install nginx
+# systemctl start nginx
+</code></pre>
+<p>Verify it works:</p>
+<pre><code>$ curl http://xx.xx.xx.xx
+</code></pre>
+<p>You should see the default Nginx welcome page.</p>
+<p><strong>Clean up</strong></p>
+<p>Destroy in reverse order:</p>
+<pre><code>$ cd 02-webserver
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<h2 id="summary">Summary</h2>
+<p>In this tutorial, we refactored the infrastructure from tutorial 01 by extracting the resource definitions into reusable modules. The infrastructure itself is unchanged, but the code is now organized following the DRY principle:</p>
+<ul>
+<li><strong>Modules</strong> (<code>modules/network/</code> and <code>modules/webserver/</code>) contain the reusable resource definitions with parameterized variables.</li>
+<li><strong>Callers</strong> (<code>01-network/</code> and <code>02-webserver/</code>) invoke the modules with concrete values.</li>
+</ul>
+<p>This separation pays off as your infrastructure grows. Need a staging environment? Create new caller directories that point to the same modules with different parameters — no code duplication needed.</p>
+<p>In the next tutorial, I will show you how to leverage this module structure to deploy your infrastructure across multiple environments (dev, staging, prod).</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+
