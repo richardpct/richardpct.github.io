@@ -6,8 +6,15 @@
     <description>Recent content in Terraform on home</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Thu, 04 Mar 2021 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Sat, 06 Mar 2021 00:00:00 +0000</lastBuildDate>
     <atom:link href="/tags/terraform/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>AWS with OpenTofu: Multi-Environment Deployments with Modules</title>
+      <link>/post/2021/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/</link>
+      <pubDate>Sat, 06 Mar 2021 00:00:00 +0000</pubDate>
+      <guid>/post/2021/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/</guid>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;/post/2026/03/22/aws-with-opentofu-refactoring-with-modules/&#34;&gt;previous tutorial&lt;/a&gt;, we refactored our infrastructure code into reusable modules. In this tutorial, we put those modules to real use by deploying the same infrastructure across &lt;strong&gt;multiple environments&lt;/strong&gt; — Dev and Staging — each running in its own AWS account with its own network configuration.&lt;/p&gt;&#xA;&lt;p&gt;Along the way, we introduce four practical improvements over the previous tutorials:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;&lt;strong&gt;Multi-environment deployment&lt;/strong&gt; — the same modules are called from separate &lt;code&gt;envs/dev/&lt;/code&gt; and &lt;code&gt;envs/staging/&lt;/code&gt; directories with different parameters&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;User-data for automated provisioning&lt;/strong&gt; — Nginx is installed automatically when the instance boots, no more manual SSH&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;SSH restricted to your IP&lt;/strong&gt; — the security group only allows SSH from your own public IP address, not from the entire internet&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;Dynamic AMI selection&lt;/strong&gt; — instead of hardcoding an AMI ID, we use the &lt;code&gt;aws_ami&lt;/code&gt; data source to always pick the latest Amazon Linux image&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;The full source code is available on my &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto03&#34;&gt;GitHub repository&lt;/a&gt;.&lt;/p&gt;</description>
+    </item>
     <item>
       <title>AWS with OpenTofu: Refactoring with Modules</title>
       <link>/post/2021/03/04/aws-with-opentofu-refactoring-with-modules/</link>
