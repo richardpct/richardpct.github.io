@@ -6,8 +6,15 @@
     <description>Recent content in Terraform on home</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Sat, 06 Mar 2021 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Tue, 16 Mar 2021 00:00:00 +0000</lastBuildDate>
     <atom:link href="/tags/terraform/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>AWS with OpenTofu: Public and Private Subnets with a Database</title>
+      <link>/post/2021/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/</link>
+      <pubDate>Tue, 16 Mar 2021 00:00:00 +0000</pubDate>
+      <guid>/post/2021/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/</guid>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;/post/2021/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/&#34;&gt;previous tutorial&lt;/a&gt;, we deployed our infrastructure across multiple environments using modules. In this tutorial, we introduce a much more realistic network topology: a &lt;strong&gt;public subnet&lt;/strong&gt; and a &lt;strong&gt;private subnet&lt;/strong&gt; within the same VPC.&lt;/p&gt;&#xA;&lt;p&gt;The scenario is based on the AWS reference architecture &lt;a href=&#34;https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Scenario2.html?shortFooter=true&#34;&gt;VPC with Public and Private Subnets (NAT)&lt;/a&gt;. You will build:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;A &lt;strong&gt;VPC&lt;/strong&gt; with a public subnet and a private subnet&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;webserver&lt;/strong&gt; in the public subnet, running a Python CGI application&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;Redis database&lt;/strong&gt; in the private subnet, counting page requests — only the webserver is allowed to connect to it, enforced by security groups&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;NAT Gateway&lt;/strong&gt; with an Elastic IP in the public subnet, so the database can reach the internet for package updates without being exposed to incoming traffic&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;Note: for this exercise I intentionally do not use the ElastiCache managed service. Instead, I install Redis on a plain EC2 instance to keep full control and demonstrate the networking concepts.&lt;/p&gt;</description>
+    </item>
     <item>
       <title>AWS with OpenTofu: Multi-Environment Deployments with Modules</title>
       <link>/post/2021/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/</link>
