@@ -105,8 +105,9 @@
     You[Your IP]
 
     subgraph VPC[VPC 10.0.0.0/16]
+        IGW[Internet Gateway]
+
         subgraph Public[Public Subnet - 10.0.0.0/24]
-            IGW[Internet Gateway]
             NAT[NAT Gateway + EIP]
             WEB[&#34;Webserver EC2&lt;br/&gt;Amazon Linux&lt;br/&gt;Python HTTP :8000&#34;]
             WEBEIP[Elastic IP]
