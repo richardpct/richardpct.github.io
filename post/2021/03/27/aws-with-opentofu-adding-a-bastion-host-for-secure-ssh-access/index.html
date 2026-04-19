@@ -100,7 +100,7 @@
 <div class="content-wrapper">
   <main>
     <h2 id="purpose">Purpose</h2>
-<p>In the <a href="/post/2026/03/24/aws-with-opentofu-public-and-private-subnets-with-a-database/">previous tutorial</a>, we isolated our Redis database in a private subnet. But there was a security gap: the webserver still accepted SSH connections directly from the internet (restricted to your IP, but still exposed). If the webserver is compromised via SSH, an attacker has a direct foothold in your VPC.</p>
+<p>In the <a href="https://richardpct.github.io/post/2021/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/">previous tutorial</a>, we isolated our Redis database in a private subnet. But there was a security gap: the webserver still accepted SSH connections directly from the internet (restricted to your IP, but still exposed). If the webserver is compromised via SSH, an attacker has a direct foothold in your VPC.</p>
 <p>In this tutorial, we add a <strong>bastion host</strong> (also called a jump server) to solve this problem. The bastion is the only instance that accepts SSH from the internet. To reach the webserver or the database via SSH, you must first jump through the bastion. This is a standard security pattern in production infrastructure.</p>
 <p>Here is what we build:</p>
 <ul>
@@ -155,13 +155,12 @@
 <pre class="mermaid">
   graph LR
     You[Your IP] -- &#34;SSH :22&#34; --&gt; BASTION[Bastion]
-    BASTION -- &#34;SSH :22&#34; --&gt; WEB[Webserver]
-    BASTION -- &#34;SSH :22&#34; --&gt; DB[Database]
-    Internet((Internet)) -. &#34;SSH Blocked&#34; .-&gt; WEB
-    Internet -. &#34;SSH Blocked&#34; .-&gt; DB
+    BASTION -- &#34;SSH :22&#34; --&gt; WEB[&#34;Webserver&lt;br/&gt;(public subnet)&#34;]
+    BASTION -- &#34;SSH :22&#34; --&gt; DB[&#34;Database&lt;br/&gt;(private subnet)&#34;]
+    Internet((Internet)) -. &#34;SSH blocked by SG&#34; .-&gt; WEB
 </pre>
 
-<p>In practice, you use SSH&rsquo;s <code>-J</code> (jump) option to connect through the bastion transparently:</p>
+<p>The webserver is in a public subnet but its security group only allows SSH from the bastion — not from the internet. The database doesn&rsquo;t even need a security group rule to block SSH from the internet: it lives in the private subnet, which has no inbound route from outside the VPC. The only way to reach it via SSH is through the bastion.</p>
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e"># Connect to the database via the bastion</span>
 </span></span><span style="display:flex;"><span>ssh -J ec2-user@&lt;bastion_public_ip&gt; ubuntu@&lt;database_private_ip&gt;
 </span></span><span style="display:flex;"><span>
@@ -247,16 +246,26 @@
 </span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">cidr_allowed_ssh</span>]
 </span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
 </span></span><span style="display:flex;"><span>}
-</span></span></code></pre></div><p>The bastion also needs an egress rule to SSH out to other instances, plus HTTP/HTTPS egress for system updates:</p>
-<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;bastion_to_any_ssh&#34;</span> {
-</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;egress&#34;</span>
-</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
-</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
-</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
-</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">anywhere</span>
-</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
+</span></span></code></pre></div><p>The bastion also needs egress rules to SSH out to the webserver and database specifically, plus HTTP/HTTPS egress for system updates. Rather than allowing SSH to anywhere (<code>0.0.0.0/0</code>), we restrict the bastion&rsquo;s outbound SSH to only the webserver and database security groups:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;bastion_to_web_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;egress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
 </span></span><span style="display:flex;"><span>}
-</span></span></code></pre></div><h3 id="the-bastion-module">The bastion module</h3>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;bastion_to_db_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;egress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">database</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This is tighter than allowing SSH to <code>0.0.0.0/0</code>: even if someone gains access to the bastion, they can only SSH to instances that belong to the webserver or database security groups — not to arbitrary hosts on the internet.</p>
+<h3 id="the-bastion-module">The bastion module</h3>
 <p>The bastion is a minimal EC2 instance — no application is installed on it, just system updates. It exists purely as an SSH gateway:</p>
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_instance&#34; &#34;bastion&#34;</span> {
 </span></span><span style="display:flex;"><span>  ami                    <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">aws_ami</span>.<span style="color:#66d9ef">amazonlinux</span>.<span style="color:#66d9ef">id</span>
@@ -347,7 +356,7 @@ $ make apply
 <p>Connect to the webserver (Amazon Linux) through the bastion:</p>
 <pre><code>$ ssh -J ec2-user@&lt;bastion_public_ip&gt; ec2-user@&lt;webserver_private_ip&gt;
 </code></pre>
-<p>Try connecting directly to the webserver without the bastion — it will be refused by the security group.</p>
+<p>Try connecting directly to the webserver or database without the bastion — it will be refused by the security group.</p>
 <h2 id="clean-up">Clean up</h2>
 <p>Destroy in reverse order:</p>
 <pre><code>$ cd envs/dev/04-webserver
@@ -360,7 +369,7 @@ $ cd ../01-network
 $ make destroy
 </code></pre>
 <h2 id="summary">Summary</h2>
-<p>In this tutorial, we added a bastion host as the single SSH entry point to our infrastructure. The webserver no longer accepts SSH from the internet — only from the bastion&rsquo;s security group. We also separated each service into its own subnet for better isolation.</p>
+<p>In this tutorial, we added a bastion host as the single SSH entry point to our infrastructure. The webserver and database no longer accept SSH from the internet — only from the bastion&rsquo;s security group. We also separated each service into its own subnet for better isolation.</p>
 <p>The security model is now layered: your IP can SSH into the bastion, the bastion can SSH into everything else, the webserver can talk to Redis, and the database can only reach the internet outbound through the NAT Gateway. Each of these rules is enforced by security groups that reference other security groups, not CIDR blocks — so the rules follow the instances even if their IPs change.</p>
 <p>In the next tutorial, you will learn how to use the high availability features provided by AWS.</p>
 
