@@ -23,11 +23,35 @@
     <loc>/post/2021/04/17/aws-with-terraform-tutorial-07/</loc>
     <lastmod>2021-04-17T18:17:44+00:00</lastmod>
   </url><url>
-    <loc>/post/2021/04/05/aws-with-terraform-tutorial-06/</loc>
-    <lastmod>2021-04-05T18:33:40+00:00</lastmod>
+    <loc>/tags/autoscaling/</loc>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
   </url><url>
     <loc>/tags/aws/</loc>
-    <lastmod>2021-03-27T00:00:00+00:00</lastmod>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/post/2021/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</loc>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/categories/</loc>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/elasticache/</loc>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/high-availability/</loc>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/opentofu/</loc>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/</loc>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/terraform/</loc>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/categories/tutorial/</loc>
+    <lastmod>2021-04-05T00:00:00+00:00</lastmod>
   </url><url>
     <loc>/post/2021/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/</loc>
     <lastmod>2021-03-27T00:00:00+00:00</lastmod>
@@ -35,22 +59,7 @@
     <loc>/tags/bastion/</loc>
     <lastmod>2021-03-27T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>/categories/</loc>
-    <lastmod>2021-03-27T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>/tags/opentofu/</loc>
-    <lastmod>2021-03-27T00:00:00+00:00</lastmod>
-  </url><url>
     <loc>/tags/security/</loc>
-    <lastmod>2021-03-27T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>/tags/</loc>
-    <lastmod>2021-03-27T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>/tags/terraform/</loc>
-    <lastmod>2021-03-27T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>/categories/tutorial/</loc>
     <lastmod>2021-03-27T00:00:00+00:00</lastmod>
   </url><url>
     <loc>/post/2021/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/</loc>

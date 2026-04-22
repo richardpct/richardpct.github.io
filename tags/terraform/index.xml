@@ -6,8 +6,15 @@
     <description>Recent content in Terraform on home</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Sat, 27 Mar 2021 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Mon, 05 Apr 2021 00:00:00 +0000</lastBuildDate>
     <atom:link href="/tags/terraform/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>AWS with OpenTofu: High Availability with Auto Scaling Groups</title>
+      <link>/post/2021/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</link>
+      <pubDate>Mon, 05 Apr 2021 00:00:00 +0000</pubDate>
+      <guid>/post/2021/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</guid>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2021/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/&#34;&gt;previous tutorial&lt;/a&gt;, we secured our infrastructure with a bastion host. But there was still a weakness: if the bastion or the webserver crashed, they stayed down until someone manually intervened. In production, that&amp;rsquo;s not acceptable.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we introduce &lt;strong&gt;Auto Scaling Groups&lt;/strong&gt; (ASG) to make the bastion and webserver self-healing. If an instance fails or is terminated for any reason, the ASG automatically launches a replacement — your service experiences only a brief downtime rather than a full outage.&lt;/p&gt;</description>
+    </item>
     <item>
       <title>AWS with OpenTofu: Adding a Bastion Host for Secure SSH Access</title>
       <link>/post/2021/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/</link>

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with OpenTofu: High Availability with Auto Scaling Groups | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">AWS with OpenTofu: High Availability with Auto Scaling Groups</span></h1>
+
+<h2 class="date">2021/04/05</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/autoscaling">autoscaling</a> <a href="/tags/elasticache">elasticache</a> <a href="/tags/high-availability">high-availability</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#what-changed-from-tutorial-05">What changed from tutorial 05</a>
+      <ul>
+        <li><a href="#from-manual-redis-to-elasticache">From manual Redis to ElastiCache</a></li>
+        <li><a href="#multi-az-subnets-with-count">Multi-AZ subnets with count</a></li>
+        <li><a href="#auto-scaling-groups">Auto Scaling Groups</a></li>
+        <li><a href="#iam-role-for-eip-re-association">IAM role for EIP re-association</a></li>
+        <li><a href="#user-data-with-eip-association">User-data with EIP association</a></li>
+      </ul>
+    </li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#deploy-the-infrastructure">Deploy the infrastructure</a>
+      <ul>
+        <li><a href="#prepare-your-variables">Prepare your variables</a></li>
+        <li><a href="#build">Build</a></li>
+        <li><a href="#test-the-webserver">Test the webserver</a></li>
+      </ul>
+    </li>
+    <li><a href="#test-the-high-availability">Test the high availability</a></li>
+    <li><a href="#clean-up">Clean up</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>In the <a href="https://richardpct.github.io/post/2021/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/">previous tutorial</a>, we secured our infrastructure with a bastion host. But there was still a weakness: if the bastion or the webserver crashed, they stayed down until someone manually intervened. In production, that&rsquo;s not acceptable.</p>
+<p>In this tutorial, we introduce <strong>Auto Scaling Groups</strong> (ASG) to make the bastion and webserver self-healing. If an instance fails or is terminated for any reason, the ASG automatically launches a replacement — your service experiences only a brief downtime rather than a full outage.</p>
+<p>We also make two architectural improvements:</p>
+<ul>
+<li><strong>ElastiCache replaces the manual Redis EC2</strong> — instead of managing our own Redis installation on an EC2 instance, we use AWS ElastiCache, a managed Redis service. This simplifies the architecture and removes the need for a NAT Gateway (ElastiCache handles its own availability).</li>
+<li><strong>Multi-AZ subnets</strong> — each service now spans 3 Availability Zones, so if an entire AZ goes down, the ASG can recreate the instance in another AZ.</li>
+<li><strong>Elastic IP re-association via IAM</strong> — when an ASG replaces an instance, the new instance gets a fresh IP. To keep the same public IP, each instance uses an IAM role to call <code>aws ec2 associate-address</code> at boot time, re-attaching the pre-existing Elastic IP to itself.</li>
+</ul>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto06">GitHub repository</a>.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<pre class="mermaid">
+  graph TB
+    Internet((Internet))
+    You[Your IP]
+
+    subgraph VPC[VPC 10.0.0.0/16]
+        IGW[Internet Gateway]
+
+        subgraph BastionSubs[&#34;Public Subnets Bastion - 3 AZs&#34;]
+            BastionCIDR[&#34;10.0.0.0/24 | 10.0.1.0/24 | 10.0.2.0/24&#34;]
+            ASGBastion[&#34;ASG min:1 max:1 --&gt; Bastion EC2&#34;]
+        end
+
+        subgraph WebSubs[&#34;Public Subnets Web - 3 AZs&#34;]
+            WebCIDR[&#34;10.0.3.0/24 | 10.0.4.0/24 | 10.0.5.0/24&#34;]
+            ASGWeb[&#34;ASG min:1 max:1 --&gt; Webserver EC2 :8000&#34;]
+        end
+
+        subgraph RedisSubs[&#34;Private Subnets Redis - 3 AZs&#34;]
+            RedisCIDR[&#34;10.0.6.0/24 | 10.0.7.0/24 | 10.0.8.0/24&#34;]
+            REDIS[&#34;ElastiCache Redis :6379&#34;]
+        end
+    end
+
+    You -- &#34;SSH :22&#34; --&gt; IGW
+    IGW -- &#34;SSH :22&#34; --&gt; ASGBastion
+    ASGBastion -. &#34;SSH :22&#34; .-&gt; ASGWeb
+    Internet -- &#34;HTTP :8000&#34; --&gt; IGW
+    IGW -- &#34;HTTP :8000&#34; --&gt; ASGWeb
+    ASGWeb -- &#34;Redis :6379&#34; --&gt; REDIS
+
+    style BastionCIDR fill:#ffd,stroke:#cc0,color:#333
+    style WebCIDR fill:#ffd,stroke:#cc0,color:#333
+    style RedisCIDR fill:#ffd,stroke:#cc0,color:#333
+</pre>
+
+<h2 id="what-changed-from-tutorial-05">What changed from tutorial 05</h2>
+<h3 id="from-manual-redis-to-elasticache">From manual Redis to ElastiCache</h3>
+<p>In the previous tutorials, we installed Redis manually on an EC2 instance in a private subnet, which required a NAT Gateway for package updates. Now we use <strong>AWS ElastiCache</strong>, a fully managed Redis service. This eliminates the need for the NAT Gateway entirely and removes one EC2 instance to manage.</p>
+<p>The ElastiCache cluster is deployed across 3 private subnets (one per AZ) and protected by the same database security group — only the webserver can connect on port 6379:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_elasticache_subnet_group&#34; &#34;redis&#34;</span> {
+</span></span><span style="display:flex;"><span>  name       <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;subnet-redis-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_ids <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_private_redis_id</span>[<span style="color:#960050;background-color:#1e0010">*</span>]
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_elasticache_cluster&#34; &#34;redis&#34;</span> {
+</span></span><span style="display:flex;"><span>  cluster_id           <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;cluster-redis&#34;</span>
+</span></span><span style="display:flex;"><span>  engine               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;redis&#34;</span>
+</span></span><span style="display:flex;"><span>  node_type            <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">instance_type</span>
+</span></span><span style="display:flex;"><span>  num_cache_nodes      <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>  parameter_group_name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;default.redis6.x&#34;</span>
+</span></span><span style="display:flex;"><span>  engine_version       <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;6.x&#34;</span>
+</span></span><span style="display:flex;"><span>  port                 <span style="color:#f92672">=</span> <span style="color:#ae81ff">6379</span>
+</span></span><span style="display:flex;"><span>  subnet_group_name    <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_elasticache_subnet_group</span>.<span style="color:#66d9ef">redis</span>.<span style="color:#66d9ef">name</span>
+</span></span><span style="display:flex;"><span>  security_group_ids   <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">sg_database_id</span>]
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Since ElastiCache is a managed service, there is no SSH access, no user-data script, no OS to update — AWS handles all of that. The Redis connection from the webserver uses the ElastiCache endpoint instead of a private IP, and no password is needed (ElastiCache handles authentication differently in its default configuration).</p>
+<h3 id="multi-az-subnets-with-count">Multi-AZ subnets with count</h3>
+<p>Instead of a single subnet per service, each service now has 3 subnets — one per Availability Zone. This is required by the ASG so it can launch replacement instances in any AZ:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_subnet&#34; &#34;public_bastion&#34;</span> {
+</span></span><span style="display:flex;"><span>  count             <span style="color:#f92672">=</span> <span style="color:#66d9ef">length</span>(<span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_public_bastion</span>)
+</span></span><span style="display:flex;"><span>  vpc_id            <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  cidr_block        <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_public_bastion</span>[<span style="color:#66d9ef">count</span>.<span style="color:#66d9ef">index</span>]
+</span></span><span style="display:flex;"><span>  availability_zone <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">aws_availability_zones</span>.<span style="color:#66d9ef">available</span>.<span style="color:#66d9ef">names</span>[<span style="color:#66d9ef">count</span>.<span style="color:#66d9ef">index</span>]
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;subnet_public_bastion-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>count</code> meta-argument creates 3 subnet resources from a single block, each in a different AZ. The same pattern is used for the web subnets. The Redis private subnets are also created as a list, but they are consumed differently — they are passed to an <code>aws_elasticache_subnet_group</code> rather than to an Auto Scaling Group. The caller passes all the CIDR blocks as lists:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span>subnet_public_bastion <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;10.0.0.0/24&#34;, &#34;10.0.1.0/24&#34;, &#34;10.0.2.0/24&#34;</span>]
+</span></span><span style="display:flex;"><span>subnet_public_web     <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;10.0.3.0/24&#34;, &#34;10.0.4.0/24&#34;, &#34;10.0.5.0/24&#34;</span>]
+</span></span><span style="display:flex;"><span>subnet_private_redis  <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;10.0.6.0/24&#34;, &#34;10.0.7.0/24&#34;, &#34;10.0.8.0/24&#34;</span>]
+</span></span></code></pre></div><h3 id="auto-scaling-groups">Auto Scaling Groups</h3>
+<p>The bastion and webserver are now managed by ASGs instead of being created as standalone <code>aws_instance</code> resources. The ASG ensures exactly one instance is always running:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_autoscaling_group&#34; &#34;bastion&#34;</span> {
+</span></span><span style="display:flex;"><span>  name                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;asg_bastion-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_zone_identifier  <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_public_bastion_id</span>[<span style="color:#960050;background-color:#1e0010">*</span>]
+</span></span><span style="display:flex;"><span>  min_size             <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>  max_size             <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">launch_template</span> {
+</span></span><span style="display:flex;"><span>    id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_launch_template</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">tag</span> {
+</span></span><span style="display:flex;"><span>    key                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;Name&#34;</span>
+</span></span><span style="display:flex;"><span>    value               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;bastion-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>    propagate_at_launch <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>With <code>min_size = 1</code> and <code>max_size = 1</code>, the ASG maintains exactly one running instance at all times. The <code>vpc_zone_identifier</code> lists all 3 bastion subnets — if the current AZ fails, the replacement instance is launched in one of the other two AZs.</p>
+<p>The self-healing process looks like this:</p>
+<pre class="mermaid">
+  graph LR
+    RUNNING[Instance running] -- &#34;Crash or termination&#34; --&gt; DETECTED[ASG detects failure]
+    DETECTED -- &#34;Launches in any AZ&#34; --&gt; NEW[New instance boots]
+    NEW -- &#34;associate-address via IAM&#34; --&gt; READY[EIP re-attached]
+</pre>
+
+<h3 id="iam-role-for-eip-re-association">IAM role for EIP re-association</h3>
+<p>When an ASG replaces an instance, the new instance gets a random public IP. To keep using the same Elastic IP, each instance needs permission to call <code>aws ec2 associate-address</code> to re-attach the EIP to itself at boot time.</p>
+<p>This requires an IAM role with the <code>ec2:AssociateAddress</code> permission:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_iam_role&#34; &#34;role&#34;</span> {
+</span></span><span style="display:flex;"><span>  name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;my_role&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  assume_role_policy <span style="color:#f92672">=</span> <span style="color:#960050;background-color:#1e0010">&lt;&lt;</span><span style="color:#66d9ef">EOF</span>
+</span></span><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Version&#34;: &#34;2012-10-17&#34;</span>,
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Statement&#34;</span><span style="color:#960050;background-color:#1e0010">:</span> [
+</span></span><span style="display:flex;"><span>    {
+</span></span><span style="display:flex;"><span>      <span style="color:#e6db74">&#34;Action&#34;: &#34;sts:AssumeRole&#34;</span>,
+</span></span><span style="display:flex;"><span>      <span style="color:#e6db74">&#34;Principal&#34;</span><span style="color:#960050;background-color:#1e0010">:</span> {
+</span></span><span style="display:flex;"><span>        <span style="color:#e6db74">&#34;Service&#34;: &#34;ec2.amazonaws.com&#34;</span>
+</span></span><span style="display:flex;"><span>      },
+</span></span><span style="display:flex;"><span>      <span style="color:#e6db74">&#34;Effect&#34;: &#34;Allow&#34;</span>
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>  ]
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">EOF</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_iam_policy&#34; &#34;policy&#34;</span> {
+</span></span><span style="display:flex;"><span>  name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;my_policy&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  policy <span style="color:#f92672">=</span> <span style="color:#960050;background-color:#1e0010">&lt;&lt;</span><span style="color:#66d9ef">EOF</span>
+</span></span><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Version&#34;: &#34;2012-10-17&#34;</span>,
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Statement&#34;</span><span style="color:#960050;background-color:#1e0010">:</span> [
+</span></span><span style="display:flex;"><span>    {
+</span></span><span style="display:flex;"><span>      <span style="color:#e6db74">&#34;Effect&#34;: &#34;Allow&#34;</span>,
+</span></span><span style="display:flex;"><span>      <span style="color:#e6db74">&#34;Action&#34;</span><span style="color:#960050;background-color:#1e0010">:</span> [
+</span></span><span style="display:flex;"><span>        <span style="color:#e6db74">&#34;ec2:AssociateAddress&#34;</span>
+</span></span><span style="display:flex;"><span>      ],
+</span></span><span style="display:flex;"><span>      <span style="color:#e6db74">&#34;Resource&#34;: &#34;*&#34;</span>
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>  ]
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">EOF</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_iam_role_policy_attachment&#34; &#34;attach&#34;</span> {
+</span></span><span style="display:flex;"><span>  role       <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_iam_role</span>.<span style="color:#66d9ef">role</span>.<span style="color:#66d9ef">name</span>
+</span></span><span style="display:flex;"><span>  policy_arn <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_iam_policy</span>.<span style="color:#66d9ef">policy</span>.<span style="color:#66d9ef">arn</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_iam_instance_profile&#34; &#34;profile&#34;</span> {
+</span></span><span style="display:flex;"><span>  name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;my_profile&#34;</span>
+</span></span><span style="display:flex;"><span>  role <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_iam_role</span>.<span style="color:#66d9ef">role</span>.<span style="color:#66d9ef">name</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>assume_role_policy</code> allows EC2 instances to assume this role. The policy grants only the <code>ec2:AssociateAddress</code> action — following the principle of least privilege. The instance profile is attached to the launch template so the EC2 instance inherits the role at boot.</p>
+<h3 id="user-data-with-eip-association">User-data with EIP association</h3>
+<p>The bastion&rsquo;s user-data script now performs the EIP re-association after system updates. It uses the EC2 instance metadata service (IMDSv2) to discover its own instance ID, then calls the AWS CLI to attach the Elastic IP:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e">#!/usr/bin/env bash
+</span></span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>exec &gt; &gt;<span style="color:#f92672">(</span>tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console<span style="color:#f92672">)</span> 2&gt;&amp;<span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>sudo yum -y update
+</span></span><span style="display:flex;"><span>sudo yum -y upgrade
+</span></span><span style="display:flex;"><span>TOKEN<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -X PUT <span style="color:#e6db74">&#34;http://169.254.169.254/latest/api/token&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  -H <span style="color:#e6db74">&#34;X-aws-ec2-metadata-token-ttl-seconds: 21600&#34;</span><span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>INSTANCE_ID<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span><span style="color:#66d9ef">$(</span>curl -H <span style="color:#e6db74">&#34;X-aws-ec2-metadata-token: </span>$TOKEN<span style="color:#e6db74">&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  http://169.254.169.254/latest/meta-data/instance-id<span style="color:#66d9ef">)</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span>aws --region <span style="color:#e6db74">${</span>region<span style="color:#e6db74">}</span> ec2 associate-address <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --instance-id $INSTANCE_ID <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --allocation-id <span style="color:#e6db74">${</span>eip_bastion_id<span style="color:#e6db74">}</span>
+</span></span></code></pre></div><p>The IMDSv2 token-based approach is the secure way to query instance metadata — the <code>PUT</code> request obtains a session token, and subsequent <code>GET</code> requests use that token. The <code>${eip_bastion_id}</code> and <code>${region}</code> variables are injected by OpenTofu&rsquo;s <code>templatefile()</code> function.</p>
+<p>The webserver&rsquo;s user-data follows the same pattern, with the addition of the Python CGI application and Redis client setup.</p>
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>aws-terraform-tuto06/
+├── modules/
+│   ├── network/              # VPC, multi-AZ subnets, IGW, SGs, IAM, EIPs
+│   │   ├── main.tf
+│   │   ├── sg.tf
+│   │   ├── iam.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   ├── bastion/              # ASG + launch template for bastion
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   ├── user-data.sh
+│   │   └── variables.tf
+│   ├── database/             # ElastiCache Redis cluster
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   └── web/                  # ASG + launch template for webserver
+│       ├── main.tf
+│       ├── outputs.tf
+│       ├── providers.tf
+│       ├── user-data.sh
+│       └── variables.tf
+└── envs/
+    └── dev/
+        ├── 01-network/
+        ├── 02-bastion/
+        ├── 03-database/
+        └── 04-web/
+</code></pre><h2 id="deploy-the-infrastructure">Deploy the infrastructure</h2>
+<h3 id="prepare-your-variables">Prepare your variables</h3>
+<p>Create a file at <code>~/terraform/aws-terraform-tuto06/terraform_vars_dev_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_aws_profile<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-06/dev/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_bastion<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-06/dev/bastion/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_database<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-06/dev/database/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_web<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-06/dev/web/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 XXXX&#34;</span>
+</span></span><span style="display:flex;"><span>MY_IP<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -s ifconfig.co/<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_ip_address<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$MY_IP<span style="color:#e6db74">/32&#34;</span>
+</span></span></code></pre></div><h3 id="build">Build</h3>
+<p>Deploy the four stacks in order:</p>
+<pre><code>$ cd envs/dev/01-network
+$ make apply
+$ cd ../02-bastion
+$ make apply
+$ cd ../03-database
+$ make apply
+$ cd ../04-web
+$ make apply
+</code></pre>
+<h3 id="test-the-webserver">Test the webserver</h3>
+<p>First, retrieve the webserver&rsquo;s Elastic IP:</p>
+<pre><code>$ aws --profile dev ec2 describe-addresses \
+    --filters &quot;Name=tag:Name,Values=eip_web-dev&quot; \
+    --query 'Addresses[*].PublicIp' \
+    --output text
+</code></pre>
+<p>Wait until the EIP is associated with the running instance (this can take a minute while user-data completes):</p>
+<pre><code>$ aws --profile dev ec2 describe-instances \
+    --filters &quot;Name=tag-value,Values=web-dev&quot; \
+    --query 'Reservations[*].Instances[*].NetworkInterfaces[*].PrivateIpAddresses[*].Association.PublicIp' \
+    --output text
+</code></pre>
+<p>Once the output matches the EIP, test the web application:</p>
+<pre><code>$ curl http://&lt;web_eip&gt;:8000/cgi-bin/hello.py
+</code></pre>
+<p>The counter increments with each request, stored in ElastiCache Redis.</p>
+<h2 id="test-the-high-availability">Test the high availability</h2>
+<p>This is the most interesting part — let&rsquo;s simulate a failure and watch the ASG recover.</p>
+<p>Get the instance ID of the running webserver:</p>
+<pre><code>$ aws --profile dev ec2 describe-instances \
+    --filters &quot;Name=tag-value,Values=web-dev&quot; &quot;Name=instance-state-name,Values=running&quot; \
+    --query &quot;Reservations[*].Instances[*].InstanceId&quot; \
+    --output text
+</code></pre>
+<p>Terminate the instance (simulating a crash):</p>
+<pre><code>$ aws --profile dev ec2 terminate-instances --instance-ids &lt;instance_id&gt;
+</code></pre>
+<p>Now watch for the replacement instance to come up:</p>
+<pre><code>$ aws --profile dev ec2 describe-instances \
+    --filters &quot;Name=tag-value,Values=web-dev&quot; &quot;Name=instance-state-name,Values=running&quot; \
+    --query &quot;Reservations[*].Instances[*].InstanceId&quot; \
+    --output text
+</code></pre>
+<p>After a few minutes, a new instance ID appears. Test the web application again using the <strong>same EIP</strong> (it never changed):</p>
+<pre><code>$ curl http://&lt;web_eip&gt;:8000/cgi-bin/hello.py
+</code></pre>
+<p>The application is back, and the counter continues from where it left off — because the data is stored in ElastiCache, not on the instance itself. The EIP is the same because the new instance re-associated it at boot via the IAM role.</p>
+<h2 id="clean-up">Clean up</h2>
+<p>Destroy in reverse order:</p>
+<pre><code>$ cd envs/dev/04-web
+$ make destroy
+$ cd ../03-database
+$ make destroy
+$ cd ../02-bastion
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<h2 id="summary">Summary</h2>
+<p>In this tutorial, we made our infrastructure self-healing using Auto Scaling Groups. If the bastion or webserver crashes, the ASG automatically replaces it, and the new instance re-attaches the same Elastic IP via an IAM role. We also simplified the database layer by switching from a manually managed Redis EC2 to AWS ElastiCache, and spread each service across 3 Availability Zones for resilience against AZ failures.</p>
+<p>The downside of this approach is that there is still a brief downtime when an instance is being replaced — the new instance needs time to boot and run its user-data script. In the next tutorial, I will show you how to eliminate this downtime by using a load balancer with multiple webserver instances running simultaneously.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+
