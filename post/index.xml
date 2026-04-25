@@ -6,8 +6,15 @@
     <description>Recent content in Posts on home</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Sun, 15 Mar 2026 12:19:28 +0100</lastBuildDate>
+    <lastBuildDate>Fri, 27 Mar 2026 00:00:00 +0000</lastBuildDate>
     <atom:link href="/post/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>AWS with OpenTofu: Load Balancing with ALB for Zero Downtime</title>
+      <link>/post/2026/03/27/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/</link>
+      <pubDate>Fri, 27 Mar 2026 00:00:00 +0000</pubDate>
+      <guid>/post/2026/03/27/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/</guid>
+      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;/post/2026/03/26/aws-with-opentofu-high-availability-with-auto-scaling-groups/&#34;&gt;previous tutorial&lt;/a&gt;, we made our infrastructure self-healing with Auto Scaling Groups. If the webserver crashed, the ASG replaced it — but there was still a brief downtime while the new instance booted. In production, even a few minutes of downtime is unacceptable.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we solve this by adding an &lt;strong&gt;Application Load Balancer&lt;/strong&gt; (ALB) in front of &lt;strong&gt;two webservers&lt;/strong&gt;. The ALB distributes requests between them, and if one webserver fails, the other keeps serving traffic immediately — zero downtime. The ASG then replaces the failed instance in the background.&lt;/p&gt;</description>
+    </item>
     <item>
       <title>Automating Kubernetes on Proxmox with Tofu</title>
       <link>/post/2026/03/15/automating-kubernetes-on-proxmox-with-tofu/</link>
@@ -35,13 +42,6 @@
       <pubDate>Fri, 23 Apr 2021 18:55:17 +0000</pubDate>
       <guid>/post/2021/04/23/aws-with-terraform-tutorial-08/</guid>
       <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial takes up the previous one&#xA;&lt;a href=&#34;https://richardpct.github.io/post/2021/04/17/aws-with-terraform-tutorial-07/&#34;&gt;aws-terraform-tuto07&lt;/a&gt;&#xA;by adding autoscaling policy in order to scale our web server according to a&#xA;metric that you chose, for our example I chose to add a web server if the CPU&#xA;Load is higher than a threshold that I have defined.&lt;/p&gt;&#xA;&lt;p&gt;The following figure depicts the infrastructure you will build:&lt;/p&gt;&#xA;&lt;div style=&#34;text-align: center;&#34;&gt;&#xA;  &lt;img src=&#34;https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-08/image01.png&#34;&gt;&#xA;&lt;/div&gt;&#xA;&lt;p&gt;The source code can be found &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto08&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;h2 id=&#34;configuring-the-autoscaling-policy&#34;&gt;Configuring the autoscaling policy&lt;/h2&gt;&#xA;&lt;h4 id=&#34;moduleswebservermaintf&#34;&gt;modules/webserver/main.tf&lt;/h4&gt;&#xA;&lt;p&gt;I only show the relevant excerpt on how to configure the autoscaling policy:&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with Terraform tutorial 07</title>
-      <link>/post/2021/04/17/aws-with-terraform-tutorial-07/</link>
-      <pubDate>Sat, 17 Apr 2021 18:17:44 +0000</pubDate>
-      <guid>/post/2021/04/17/aws-with-terraform-tutorial-07/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial takes up the previous one&#xA;&lt;a href=&#34;https://richardpct.github.io/post/2021/04/05/aws-with-terraform-tutorial-06/&#34;&gt;aws-terraform-tuto06&lt;/a&gt;&#xA;by adding an ALB (Application Load Balancer) in front of the 2 web servers for&#xA;sharing the load between 2 web servers and having a short downtime when a web&#xA;server is failing.&lt;/p&gt;&#xA;&lt;p&gt;The following figure depicts the infrastructure you will build:&lt;/p&gt;&#xA;&lt;div style=&#34;text-align: center;&#34;&gt;&#xA;  &lt;img src=&#34;https://raw.githubusercontent.com/richardpct/images/master/aws-tuto-07/image01.png&#34;&gt;&#xA;&lt;/div&gt;&#xA;&lt;p&gt;The source code can be found &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto07&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;h2 id=&#34;configuring-the-network&#34;&gt;Configuring the network&lt;/h2&gt;&#xA;&lt;h4 id=&#34;environmentsdev00-basemaintf&#34;&gt;environments/dev/00-base/main.tf&lt;/h4&gt;&#xA;&lt;p&gt;The following code shows how the subnets are configured:&lt;/p&gt;</description>
     </item>
     <item>
       <title>AWS with OpenTofu: High Availability with Auto Scaling Groups</title>
