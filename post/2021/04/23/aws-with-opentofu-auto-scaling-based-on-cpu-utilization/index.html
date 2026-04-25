@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with OpenTofu: Auto Scaling Based on CPU Utilization | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">AWS with OpenTofu: Auto Scaling Based on CPU Utilization</span></h1>
+
+<h2 class="date">2021/04/23</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/autoscaling">autoscaling</a> <a href="/tags/cloudwatch">cloudwatch</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#how-auto-scaling-works">How auto scaling works</a></li>
+    <li><a href="#what-changed-from-tutorial-07">What changed from tutorial 07</a>
+      <ul>
+        <li><a href="#1-max_size-increased-to-3">1. max_size increased to 3</a></li>
+        <li><a href="#2-the-auto-scaling-policy">2. The auto scaling policy</a></li>
+      </ul>
+    </li>
+    <li><a href="#deploy-the-infrastructure">Deploy the infrastructure</a>
+      <ul>
+        <li><a href="#prepare-your-variables">Prepare your variables</a></li>
+        <li><a href="#build">Build</a></li>
+        <li><a href="#test-the-application">Test the application</a></li>
+      </ul>
+    </li>
+    <li><a href="#test-the-auto-scaling">Test the auto scaling</a>
+      <ul>
+        <li><a href="#scale-out">Scale out</a></li>
+        <li><a href="#scale-in">Scale in</a></li>
+      </ul>
+    </li>
+    <li><a href="#clean-up">Clean up</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>In the <a href="/post/2026/03/27/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/">previous tutorial</a>, we deployed two webservers behind an Application Load Balancer for zero-downtime failover. The ASG maintained exactly 2 instances at all times — no more, no less. But what happens when traffic spikes and your two servers can&rsquo;t keep up?</p>
+<p>In this tutorial, we add an <strong>auto scaling policy</strong> so that the ASG can dynamically scale out from 2 to 3 webservers when the average CPU utilization crosses a threshold, and scale back in when the load drops. This is the difference between a fixed fleet and an elastic one — AWS automatically adjusts capacity to match demand.</p>
+<p>The infrastructure is identical to tutorial 07 except for two changes in the web module: <code>max_size</code> goes from <code>2</code> to <code>3</code>, and a new <code>aws_autoscaling_policy</code> resource is added. Everything else — the ALB, the bastion, ElastiCache, the 5 subnet groups across 3 AZs — remains the same.</p>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto08">GitHub repository</a>.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<pre class="mermaid">
+  graph TB
+    Internet((Internet))
+
+    subgraph VPC[VPC 10.0.0.0/16]
+        IGW[Internet Gateway]
+
+        subgraph LBSubs[&#34;Public Subnets ALB - 3 AZs&#34;]
+            ALB[&#34;Application Load Balancer :80&#34;]
+        end
+
+        subgraph NATSubs[&#34;Public Subnets NAT - 3 AZs&#34;]
+            NAT[&#34;3x NAT Gateways&#34;]
+        end
+
+        subgraph BastionSubs[&#34;Public Subnets Bastion - 3 AZs&#34;]
+            BASTION[&#34;ASG min:1 max:1 --&gt; Bastion EC2&#34;]
+        end
+
+        subgraph WebSubs[&#34;Private Subnets Web - 3 AZs&#34;]
+            ASGWEB[&#34;ASG min:2 max:3 --&gt; 2 or 3 Webservers :8000&#34;]
+            POLICY[&#34;Auto Scaling Policy: CPU &gt; 40%&#34;]
+        end
+
+        subgraph RedisSubs[&#34;Private Subnets Redis - 3 AZs&#34;]
+            REDIS[&#34;ElastiCache Redis :6379&#34;]
+        end
+    end
+
+    CW[&#34;CloudWatch Alarms&lt;br/&gt;CPU Utilization&#34;]
+
+    Internet -- &#34;HTTP :80&#34; --&gt; IGW
+    IGW --&gt; ALB
+    ALB -- &#34;HTTP :8000&#34; --&gt; ASGWEB
+    ASGWEB -- &#34;Redis :6379&#34; --&gt; REDIS
+    ASGWEB -- &#34;outbound&#34; --&gt; NAT
+    NAT --&gt; IGW
+    CW -. &#34;Scale out / Scale in&#34; .-&gt; ASGWEB
+</pre>
+
+<p>The only visual difference from tutorial 07 is the ASG now shows <code>min:2 max:3</code> and the CloudWatch alarm feeds back into the ASG to trigger scaling actions.</p>
+<h2 id="how-auto-scaling-works">How auto scaling works</h2>
+<p>The scaling process uses a feedback loop between the ASG, CloudWatch, and the scaling policy:</p>
+<pre class="mermaid">
+  graph LR
+    INSTANCES[&#34;2 Web Servers&#34;] -- &#34;Report CPU metrics&#34; --&gt; CW[CloudWatch]
+    CW -- &#34;Avg CPU &gt; 40%&#34; --&gt; SCALEOUT[Scale Out Alarm]
+    SCALEOUT -- &#34;Launch 1 instance&#34; --&gt; ASG[ASG: now 3 instances]
+    ASG -- &#34;Report CPU metrics&#34; --&gt; CW2[CloudWatch]
+    CW2 -- &#34;Avg CPU &lt; 40%&#34; --&gt; SCALEIN[Scale In Alarm]
+    SCALEIN -- &#34;Terminate 1 instance&#34; --&gt; BACK[&#34;ASG: back to 2 instances&#34;]
+</pre>
+
+<p>AWS creates two CloudWatch alarms automatically when you use <code>TargetTrackingScaling</code>: one to trigger scale-out (when the metric exceeds the target) and one to trigger scale-in (when it drops below). You don&rsquo;t need to define these alarms yourself — the policy handles everything.</p>
+<h2 id="what-changed-from-tutorial-07">What changed from tutorial 07</h2>
+<p>The only change is in <code>modules/web/main.tf</code>. Two things are different:</p>
+<h3 id="1-max_size-increased-to-3">1. max_size increased to 3</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_autoscaling_group&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  name                <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;asg_web-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_zone_identifier <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_private_web_id</span>[<span style="color:#960050;background-color:#1e0010">*</span>]
+</span></span><span style="display:flex;"><span>  target_group_arns   <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">alb_target_group_web_arn</span>]
+</span></span><span style="display:flex;"><span>  health_check_type   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ELB&#34;</span>
+</span></span><span style="display:flex;"><span>  min_size            <span style="color:#f92672">=</span> <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span>  max_size            <span style="color:#f92672">=</span> <span style="color:#ae81ff">3</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">launch_template</span> {
+</span></span><span style="display:flex;"><span>    id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_launch_template</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">tag</span> {
+</span></span><span style="display:flex;"><span>    key                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;Name&#34;</span>
+</span></span><span style="display:flex;"><span>    value               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;web-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>    propagate_at_launch <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>With <code>min_size = 2</code>, the ASG always keeps at least 2 instances running — this is your baseline capacity. With <code>max_size = 3</code>, the ASG is allowed to launch up to 3 instances when scaling out, but never more. This cap prevents runaway scaling in case of an unexpected load spike.</p>
+<h3 id="2-the-auto-scaling-policy">2. The auto scaling policy</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_autoscaling_policy&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  name                   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;autoscaling_policy_web-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  policy_type            <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;TargetTrackingScaling&#34;</span>
+</span></span><span style="display:flex;"><span>  autoscaling_group_name <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_autoscaling_group</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">name</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">target_tracking_configuration</span> {
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">predefined_metric_specification</span> {
+</span></span><span style="display:flex;"><span>      predefined_metric_type <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ASGAverageCPUUtilization&#34;</span>
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    target_value <span style="color:#f92672">=</span> <span style="color:#ae81ff">40</span>.<span style="color:#ae81ff">0</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This is the core of this tutorial. Let&rsquo;s break it down:</p>
+<ul>
+<li>
+<p><strong><code>policy_type = &quot;TargetTrackingScaling&quot;</code></strong> — this is the simplest and most commonly used scaling policy type. You specify a target value for a metric, and AWS automatically creates the CloudWatch alarms and scaling actions to keep the metric near that target. There are other policy types (<code>SimpleScaling</code>, <code>StepScaling</code>), but target tracking is recommended for most use cases.</p>
+</li>
+<li>
+<p><strong><code>predefined_metric_type = &quot;ASGAverageCPUUtilization&quot;</code></strong> — the metric to track. This is the average CPU utilization across all instances in the ASG. AWS provides several predefined metrics; other options include <code>ALBRequestCountPerTarget</code> (scale based on request count per instance) and <code>ASGAverageNetworkIn</code> (scale based on network traffic).</p>
+</li>
+<li>
+<p><strong><code>target_value = 40.0</code></strong> — the ASG will try to keep the average CPU utilization at 40%. When it rises above 40%, a third instance is launched. When it drops below 40%, the extra instance is terminated. In production, you would typically set this higher (60-70%), but 40% makes it easier to trigger for testing purposes.</p>
+</li>
+</ul>
+<h2 id="deploy-the-infrastructure">Deploy the infrastructure</h2>
+<h3 id="prepare-your-variables">Prepare your variables</h3>
+<p>Create a file at <code>~/terraform/aws-terraform-tuto08/terraform_vars_dev_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_aws_profile<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-08/dev/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_bastion<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-08/dev/bastion/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_database<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-08/dev/database/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_web<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-08/dev/web/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 XXXX&#34;</span>
+</span></span><span style="display:flex;"><span>MY_IP<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -s ifconfig.co/<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_ip_address<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$MY_IP<span style="color:#e6db74">/32&#34;</span>
+</span></span></code></pre></div><h3 id="build">Build</h3>
+<p>Deploy the four stacks in order:</p>
+<pre><code>$ cd envs/dev/01-network
+$ make apply
+$ cd ../02-bastion
+$ make apply
+$ cd ../03-database
+$ make apply
+$ cd ../04-web
+$ make apply
+</code></pre>
+<h3 id="test-the-application">Test the application</h3>
+<p>Get the ALB DNS name:</p>
+<pre><code>$ aws --profile dev elbv2 describe-load-balancers --names alb-web-dev \
+    --query 'LoadBalancers[*].DNSName' \
+    --output text
+</code></pre>
+<p>Issue several requests:</p>
+<pre><code>$ curl http://&lt;load_balancer_dns&gt;/cgi-bin/hello.py
+</code></pre>
+<p>You should see the counter incrementing and two different instance IDs alternating — confirming the ALB is distributing traffic across both webservers.</p>
+<h2 id="test-the-auto-scaling">Test the auto scaling</h2>
+<p>This is the interesting part. We will artificially overload one server&rsquo;s CPU and watch the ASG react by launching a third instance.</p>
+<h3 id="scale-out">Scale out</h3>
+<p>Connect to one of the webservers through the bastion and install the <code>stress</code> tool:</p>
+<pre><code>$ ssh -J ec2-user@&lt;bastion_eip&gt; ec2-user@&lt;web_private_ip&gt;
+$ sudo yum -y install stress
+$ stress --cpu 1
+</code></pre>
+<p>This saturates one CPU core, pushing that instance&rsquo;s CPU utilization well above 40%. Since the scaling policy uses the <strong>average</strong> across all instances, one overloaded instance is enough to push the average above the threshold (one instance at ~100% and one at ~5% gives an average of ~52%).</p>
+<p>Wait a few minutes — CloudWatch needs time to collect data points and trigger the alarm. Then check the running instances:</p>
+<pre><code>$ aws --profile dev ec2 describe-instances \
+    --filters &quot;Name=tag-value,Values=web-dev&quot; &quot;Name=instance-state-name,Values=running&quot; \
+    --query &quot;Reservations[*].Instances[*].InstanceId&quot; \
+    --output text
+</code></pre>
+<p>You should now see <strong>3 instance IDs</strong>. Make some requests to the ALB:</p>
+<pre><code>$ curl http://&lt;load_balancer_dns&gt;/cgi-bin/hello.py
+</code></pre>
+<p>You will now see 3 different instance IDs in the responses — the ALB is distributing traffic across all three webservers.</p>
+<h3 id="scale-in">Scale in</h3>
+<p>Stop the stress process by pressing <code>CTRL-C</code> in your terminal. The CPU utilization drops back to normal, and the average across all 3 instances falls below 40%.</p>
+<p>Wait a few minutes for CloudWatch to detect the change. The ASG will terminate one instance, bringing the fleet back down to 2:</p>
+<pre><code>$ aws --profile dev ec2 describe-instances \
+    --filters &quot;Name=tag-value,Values=web-dev&quot; &quot;Name=instance-state-name,Values=running&quot; \
+    --query &quot;Reservations[*].Instances[*].InstanceId&quot; \
+    --output text
+</code></pre>
+<p>You&rsquo;re back to 2 instances. The scaling is fully automatic — no manual intervention needed.</p>
+<h2 id="clean-up">Clean up</h2>
+<p>Destroy in reverse order:</p>
+<pre><code>$ cd envs/dev/04-web
+$ make destroy
+$ cd ../03-database
+$ make destroy
+$ cd ../02-bastion
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<h2 id="summary">Summary</h2>
+<p>In this tutorial, we added a single resource — <code>aws_autoscaling_policy</code> — to make our infrastructure elastic. The ASG now automatically scales from 2 to 3 webservers when the average CPU utilization exceeds 40%, and scales back down when the load drops. AWS handles the CloudWatch alarms and scaling actions automatically through the target tracking policy.</p>
+<p>This completes our series on infrastructure fundamentals. Over these 8 tutorials, we have progressively built up from a single EC2 instance to a production-grade architecture with VPC networking, private subnets, a bastion host, an ALB, ElastiCache, Auto Scaling Groups, and dynamic scaling policies. In the next tutorial, I will show you how to apply all of these concepts to deploy a real application: GitLab.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+

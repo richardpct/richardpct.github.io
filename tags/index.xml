@@ -6,20 +6,48 @@
     <description>Recent content in Tags on home</description>
     <generator>Hugo</generator>
     <language>en-us</language>
-    <lastBuildDate>Sat, 17 Apr 2021 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Fri, 23 Apr 2021 00:00:00 +0000</lastBuildDate>
     <atom:link href="/tags/index.xml" rel="self" type="application/rss+xml" />
     <item>
-      <title>Alb</title>
-      <link>/tags/alb/</link>
-      <pubDate>Sat, 17 Apr 2021 00:00:00 +0000</pubDate>
-      <guid>/tags/alb/</guid>
+      <title>Autoscaling</title>
+      <link>/tags/autoscaling/</link>
+      <pubDate>Fri, 23 Apr 2021 00:00:00 +0000</pubDate>
+      <guid>/tags/autoscaling/</guid>
       <description></description>
     </item>
     <item>
       <title>Aws</title>
       <link>/tags/aws/</link>
-      <pubDate>Sat, 17 Apr 2021 00:00:00 +0000</pubDate>
+      <pubDate>Fri, 23 Apr 2021 00:00:00 +0000</pubDate>
       <guid>/tags/aws/</guid>
+      <description></description>
+    </item>
+    <item>
+      <title>Cloudwatch</title>
+      <link>/tags/cloudwatch/</link>
+      <pubDate>Fri, 23 Apr 2021 00:00:00 +0000</pubDate>
+      <guid>/tags/cloudwatch/</guid>
+      <description></description>
+    </item>
+    <item>
+      <title>Opentofu</title>
+      <link>/tags/opentofu/</link>
+      <pubDate>Fri, 23 Apr 2021 00:00:00 +0000</pubDate>
+      <guid>/tags/opentofu/</guid>
+      <description></description>
+    </item>
+    <item>
+      <title>Terraform</title>
+      <link>/tags/terraform/</link>
+      <pubDate>Fri, 23 Apr 2021 00:00:00 +0000</pubDate>
+      <guid>/tags/terraform/</guid>
+      <description></description>
+    </item>
+    <item>
+      <title>Alb</title>
+      <link>/tags/alb/</link>
+      <pubDate>Sat, 17 Apr 2021 00:00:00 +0000</pubDate>
+      <guid>/tags/alb/</guid>
       <description></description>
     </item>
     <item>
@@ -34,27 +62,6 @@
       <link>/tags/load-balancer/</link>
       <pubDate>Sat, 17 Apr 2021 00:00:00 +0000</pubDate>
       <guid>/tags/load-balancer/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Opentofu</title>
-      <link>/tags/opentofu/</link>
-      <pubDate>Sat, 17 Apr 2021 00:00:00 +0000</pubDate>
-      <guid>/tags/opentofu/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Terraform</title>
-      <link>/tags/terraform/</link>
-      <pubDate>Sat, 17 Apr 2021 00:00:00 +0000</pubDate>
-      <guid>/tags/terraform/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Autoscaling</title>
-      <link>/tags/autoscaling/</link>
-      <pubDate>Mon, 05 Apr 2021 00:00:00 +0000</pubDate>
-      <guid>/tags/autoscaling/</guid>
       <description></description>
     </item>
     <item>
