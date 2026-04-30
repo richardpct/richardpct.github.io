@@ -14,34 +14,40 @@
     <loc>/post/2026/01/05/automating-proxmox-ceph-with-ansible/</loc>
     <lastmod>2026-01-05T21:14:27+01:00</lastmod>
   </url><url>
-    <loc>/post/2021/06/03/aws-with-terraform-tutorial-gitlab/</loc>
-    <lastmod>2021-06-03T19:24:14+00:00</lastmod>
+    <loc>/tags/aws/</loc>
+    <lastmod>2021-06-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/post/2021/06/03/aws-with-opentofu-deploying-a-production-gitlab-instance/</loc>
+    <lastmod>2021-06-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/categories/</loc>
+    <lastmod>2021-06-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/ci-cd/</loc>
+    <lastmod>2021-06-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/gitlab/</loc>
+    <lastmod>2021-06-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/opentofu/</loc>
+    <lastmod>2021-06-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/</loc>
+    <lastmod>2021-06-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/tags/terraform/</loc>
+    <lastmod>2021-06-03T00:00:00+00:00</lastmod>
+  </url><url>
+    <loc>/categories/tutorial/</loc>
+    <lastmod>2021-06-03T00:00:00+00:00</lastmod>
   </url><url>
     <loc>/tags/autoscaling/</loc>
-    <lastmod>2021-04-23T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>/tags/aws/</loc>
     <lastmod>2021-04-23T00:00:00+00:00</lastmod>
   </url><url>
     <loc>/post/2021/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/</loc>
     <lastmod>2021-04-23T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>/categories/</loc>
-    <lastmod>2021-04-23T00:00:00+00:00</lastmod>
-  </url><url>
     <loc>/tags/cloudwatch/</loc>
-    <lastmod>2021-04-23T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>/tags/opentofu/</loc>
-    <lastmod>2021-04-23T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>/tags/</loc>
-    <lastmod>2021-04-23T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>/tags/terraform/</loc>
-    <lastmod>2021-04-23T00:00:00+00:00</lastmod>
-  </url><url>
-    <loc>/categories/tutorial/</loc>
     <lastmod>2021-04-23T00:00:00+00:00</lastmod>
   </url><url>
     <loc>/tags/alb/</loc>

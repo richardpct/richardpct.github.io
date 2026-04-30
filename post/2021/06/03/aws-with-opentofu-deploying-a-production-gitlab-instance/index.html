@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with OpenTofu: Deploying a Production GitLab Instance | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">AWS with OpenTofu: Deploying a Production GitLab Instance</span></h1>
+
+<h2 class="date">2021/06/03</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/gitlab">gitlab</a> <a href="/tags/ci-cd">ci-cd</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#network-design">Network design</a></li>
+    <li><a href="#two-load-balancers">Two load balancers</a></li>
+    <li><a href="#managed-services">Managed services</a>
+      <ul>
+        <li><a href="#rds-postgresql">RDS PostgreSQL</a></li>
+        <li><a href="#elasticache-redis">ElastiCache Redis</a></li>
+        <li><a href="#efs-elastic-file-system">EFS (Elastic File System)</a></li>
+      </ul>
+    </li>
+    <li><a href="#gitlab-configuration">GitLab configuration</a>
+      <ul>
+        <li><a href="#the-launch-template">The launch template</a></li>
+        <li><a href="#the-user-data-script">The user-data script</a></li>
+      </ul>
+    </li>
+    <li><a href="#gitlab-runners">GitLab Runners</a>
+      <ul>
+        <li><a href="#runner-user-data">Runner user-data</a></li>
+      </ul>
+    </li>
+    <li><a href="#security-group-rules">Security group rules</a></li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#deploy-the-infrastructure">Deploy the infrastructure</a>
+      <ul>
+        <li><a href="#prepare-your-variables">Prepare your variables</a></li>
+        <li><a href="#build-the-infrastructure-without-the-runner">Build the infrastructure (without the Runner)</a></li>
+        <li><a href="#access-gitlab">Access GitLab</a></li>
+        <li><a href="#deploy-a-runner">Deploy a Runner</a></li>
+      </ul>
+    </li>
+    <li><a href="#clean-up">Clean up</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>In the <a href="https://richardpct.github.io/post/2021/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/">previous tutorials</a>, we progressively built up an AWS infrastructure from a single EC2 instance to an auto-scaling fleet behind a load balancer. In this tutorial, we apply everything we have learned to deploy a real-world application: <strong>GitLab</strong>.</p>
+<p>GitLab is one of the most widely used Git repository managers in the world, and it includes a built-in CI/CD pipeline engine called <strong>Runners</strong>. For building this infrastructure, I followed the <a href="https://docs.gitlab.com/ee/install/aws/">official GitLab installation guide for AWS</a>, with one simplification: instead of using a separate Gitaly service for Git repository storage, I use a shared NFS filesystem via AWS EFS. This keeps the architecture simpler while still supporting multiple GitLab instances.</p>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-terraform-gitlab">GitHub repository</a>.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<pre class="mermaid">
+  graph TB
+    Internet((Internet))
+    You[Your IP]
+
+    subgraph VPC[VPC 10.0.0.0/16]
+        IGW[Internet Gateway]
+
+        subgraph PubSubs[&#34;Public Subnets - 10.0.11-13.0/24 - 3 AZs&#34;]
+            BASTION[&#34;Bastion EC2&#34;]
+            ALBExt[&#34;External ALB :80&#34;]
+            NAT[&#34;3x NAT Gateways&#34;]
+        end
+
+        subgraph GitlabSubs[&#34;Private GitLab Subnets - 10.0.21-23.0/24 - 3 AZs&#34;]
+            GITLAB[&#34;GitLab EC2 - c5.xlarge&#34;]
+            RUNNER[&#34;Runner EC2&#34;]
+        end
+
+        subgraph PrivSubs[&#34;Private Subnets - 10.0.31-33.0/24 - 3 AZs&#34;]
+            ALBInt[&#34;Internal ALB :80&#34;]
+            POSTGRES[&#34;RDS PostgreSQL :5432&#34;]
+            REDIS[&#34;ElastiCache Redis :6379&#34;]
+            EFS[&#34;EFS NFS :2049&#34;]
+        end
+    end
+
+    Internet -- &#34;HTTP :80&#34; --&gt; IGW
+    IGW -- &#34;HTTP :80&#34; --&gt; ALBExt
+    ALBExt --&gt; GITLAB
+    You -- &#34;SSH :22&#34; --&gt; IGW
+    IGW -. &#34;SSH&#34; .-&gt; BASTION
+    BASTION -. &#34;SSH&#34; .-&gt; GITLAB
+    BASTION -. &#34;SSH&#34; .-&gt; RUNNER
+    GITLAB --&gt; EFS
+    GITLAB --&gt; REDIS
+    GITLAB --&gt; POSTGRES
+    RUNNER --&gt; ALBInt
+    ALBInt --&gt; GITLAB
+    GITLAB -- &#34;outbound&#34; --&gt; NAT
+    RUNNER -- &#34;outbound&#34; --&gt; NAT
+    NAT --&gt; IGW
+
+    linkStyle 12 stroke:none,fill:none
+    linkStyle 13 stroke:none,fill:none
+</pre>
+
+<h2 id="network-design">Network design</h2>
+<p>The network is organized into three subnet groups, each spanning 3 Availability Zones:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Subnet group</th>
+          <th>Type</th>
+          <th>CIDR blocks</th>
+          <th>Contents</th>
+          <th>Internet access</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Public</td>
+          <td>Public</td>
+          <td>10.0.11.0/24, 10.0.12.0/24, 10.0.13.0/24</td>
+          <td>Bastion, External ALB, NAT Gateways</td>
+          <td>Direct via IGW</td>
+      </tr>
+      <tr>
+          <td>GitLab Private</td>
+          <td>Private</td>
+          <td>10.0.21.0/24, 10.0.22.0/24, 10.0.23.0/24</td>
+          <td>GitLab instances, Runners</td>
+          <td>Outbound via NAT</td>
+      </tr>
+      <tr>
+          <td>Private</td>
+          <td>Private</td>
+          <td>10.0.31.0/24, 10.0.32.0/24, 10.0.33.0/24</td>
+          <td>Internal ALB, PostgreSQL, Redis, EFS</td>
+          <td>None</td>
+      </tr>
+  </tbody>
+</table>
+<p>The distinction between the two private subnet groups is important:</p>
+<ul>
+<li><strong>GitLab Private subnets</strong> route outbound traffic through the NAT Gateway — GitLab and the Runners need internet access to download packages and Docker images.</li>
+<li><strong>Private subnets</strong> have no route to the NAT Gateway — they host only AWS managed services (RDS, ElastiCache, EFS) and the internal ALB, which don&rsquo;t need internet access.</li>
+</ul>
+<p>The VPC has <code>enable_dns_hostnames = true</code> set, which is required for EFS mount targets to resolve correctly.</p>
+<h2 id="two-load-balancers">Two load balancers</h2>
+<p>A distinctive feature of this architecture is the use of <strong>two ALBs</strong> — one external and one internal:</p>
+<pre class="mermaid">
+  graph LR
+    Users((Users)) -- &#34;HTTP :80&#34; --&gt; ALBExt[External ALB]
+    ALBExt -- &#34;HTTP :80&#34; --&gt; GITLAB[GitLab]
+    RUNNER[Runner] -- &#34;HTTP :80&#34; --&gt; ALBInt[Internal ALB]
+    ALBInt -- &#34;HTTP :80&#34; --&gt; GITLAB
+</pre>
+
+<ul>
+<li><strong>External ALB</strong> — internet-facing, deployed in the public subnets. This is how users access the GitLab web interface. It accepts HTTP on port 80 from anywhere and forwards to the GitLab instance on port 80.</li>
+<li><strong>Internal ALB</strong> — private, deployed in the private subnets (<code>internal = true</code>). This is how Runners communicate with GitLab to fetch jobs and push results. Runners connect to the internal ALB&rsquo;s DNS name, which routes to the same GitLab instance but through a completely private path — no internet traffic involved.</li>
+</ul>
+<p>Both ALBs use the same health check: they hit the root path <code>/</code> and expect a <code>302</code> redirect (GitLab redirects to the login page). The health check is configured with a generous interval of 90 seconds and a high unhealthy threshold of 10, because GitLab takes several minutes to boot.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_lb&#34; &#34;gitlab_external&#34;</span> {
+</span></span><span style="display:flex;"><span>  name               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;alb-gitlab-external-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  internal           <span style="color:#f92672">=</span> <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span>  load_balancer_type <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;application&#34;</span>
+</span></span><span style="display:flex;"><span>  security_groups    <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">sg_alb_gitlab_external_id</span>]
+</span></span><span style="display:flex;"><span>  subnets            <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_public_id</span>[<span style="color:#960050;background-color:#1e0010">*</span>]
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_lb&#34; &#34;gitlab_internal&#34;</span> {
+</span></span><span style="display:flex;"><span>  name               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;alb-gitlab-internal-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  internal           <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>  load_balancer_type <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;application&#34;</span>
+</span></span><span style="display:flex;"><span>  security_groups    <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">sg_alb_gitlab_internal_id</span>]
+</span></span><span style="display:flex;"><span>  subnets            <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_private_id</span>[<span style="color:#960050;background-color:#1e0010">*</span>]
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The GitLab ASG is registered with <strong>both</strong> target groups, so the single GitLab instance receives traffic from both ALBs:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_autoscaling_group&#34; &#34;gitlab&#34;</span> {
+</span></span><span style="display:flex;"><span>  target_group_arns <span style="color:#f92672">=</span> [
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">aws_lb_target_group</span>.<span style="color:#66d9ef">gitlab_external</span>.<span style="color:#66d9ef">arn</span>,
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">aws_lb_target_group</span>.<span style="color:#66d9ef">gitlab_internal</span>.<span style="color:#66d9ef">arn</span>
+</span></span><span style="display:flex;"><span>  ]
+</span></span><span style="display:flex;"><span>  ...
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="managed-services">Managed services</h2>
+<p>This architecture uses AWS managed services for data storage:</p>
+<h3 id="rds-postgresql">RDS PostgreSQL</h3>
+<p>GitLab uses PostgreSQL as its primary database. We use RDS (Relational Database Service) — a managed PostgreSQL instance:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_db_instance&#34; &#34;postgres&#34;</span> {
+</span></span><span style="display:flex;"><span>  allocated_storage       <span style="color:#f92672">=</span> <span style="color:#ae81ff">5</span>
+</span></span><span style="display:flex;"><span>  engine                  <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;postgres&#34;</span>
+</span></span><span style="display:flex;"><span>  instance_class          <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">postgres_type</span>
+</span></span><span style="display:flex;"><span>  db_name                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;gitlabhq_production&#34;</span>
+</span></span><span style="display:flex;"><span>  username                <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">postgres_user</span>
+</span></span><span style="display:flex;"><span>  password                <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">postgres_pass</span>
+</span></span><span style="display:flex;"><span>  skip_final_snapshot     <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>  backup_retention_period <span style="color:#f92672">=</span> <span style="color:#ae81ff">0</span>
+</span></span><span style="display:flex;"><span>  db_subnet_group_name    <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_db_subnet_group</span>.<span style="color:#66d9ef">postgres</span>.<span style="color:#66d9ef">name</span>
+</span></span><span style="display:flex;"><span>  vpc_security_group_ids  <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">sg_postgres_id</span>]
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The database name <code>gitlabhq_production</code> is the default expected by GitLab. The security group only allows connections from the GitLab security group on port 5432.</p>
+<h3 id="elasticache-redis">ElastiCache Redis</h3>
+<p>GitLab uses Redis for caching and background job queuing. We use ElastiCache, the same managed Redis service from previous tutorials:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_elasticache_cluster&#34; &#34;redis&#34;</span> {
+</span></span><span style="display:flex;"><span>  cluster_id           <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;cluster-redis&#34;</span>
+</span></span><span style="display:flex;"><span>  engine               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;redis&#34;</span>
+</span></span><span style="display:flex;"><span>  node_type            <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">redis_type</span>
+</span></span><span style="display:flex;"><span>  num_cache_nodes      <span style="color:#f92672">=</span> <span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>  parameter_group_name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;default.redis6.x&#34;</span>
+</span></span><span style="display:flex;"><span>  engine_version       <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;6.x&#34;</span>
+</span></span><span style="display:flex;"><span>  port                 <span style="color:#f92672">=</span> <span style="color:#ae81ff">6379</span>
+</span></span><span style="display:flex;"><span>  subnet_group_name    <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_elasticache_subnet_group</span>.<span style="color:#66d9ef">redis</span>.<span style="color:#66d9ef">name</span>
+</span></span><span style="display:flex;"><span>  security_group_ids   <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">sg_redis_id</span>]
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h3 id="efs-elastic-file-system">EFS (Elastic File System)</h3>
+<p>EFS provides a shared NFS filesystem that persists across GitLab instance replacements. It stores Git repositories, uploads, shared data, and CI build artifacts:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_efs_file_system&#34; &#34;gitlab&#34;</span> {
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;gitlab-efs-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_efs_mount_target&#34; &#34;gitlab&#34;</span> {
+</span></span><span style="display:flex;"><span>  count           <span style="color:#f92672">=</span> <span style="color:#66d9ef">length</span>(<span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_private</span>)
+</span></span><span style="display:flex;"><span>  file_system_id  <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_efs_file_system</span>.<span style="color:#66d9ef">gitlab</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  subnet_id       <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">private</span>[<span style="color:#66d9ef">count</span>.<span style="color:#66d9ef">index</span>].<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_groups <span style="color:#f92672">=</span> [<span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">efs</span>.<span style="color:#66d9ef">id</span>]
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Mount targets are created in all 3 private subnets so the GitLab instance can mount the filesystem regardless of which AZ it runs in. The EFS security group only allows NFS traffic (port 2049) from the GitLab security group.</p>
+<h2 id="gitlab-configuration">GitLab configuration</h2>
+<h3 id="the-launch-template">The launch template</h3>
+<p>The GitLab instance runs Ubuntu Noble 24.04 on a <code>c5.xlarge</code> (4 vCPUs, 8 GB RAM) — GitLab needs significant resources. The root EBS volume is increased to 10 GB because the default 8 GB is not enough to install GitLab:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_launch_template&#34; &#34;gitlab&#34;</span> {
+</span></span><span style="display:flex;"><span>  name          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;gitlab-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  image_id      <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">aws_ami</span>.<span style="color:#66d9ef">ubuntu</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  instance_type <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">instance_type</span>
+</span></span><span style="display:flex;"><span>  key_name      <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">ssh_key</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">block_device_mappings</span> {
+</span></span><span style="display:flex;"><span>    device_name <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">aws_ami</span>.<span style="color:#66d9ef">ubuntu</span>.<span style="color:#66d9ef">root_device_name</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">ebs</span> {
+</span></span><span style="display:flex;"><span>      volume_size           <span style="color:#f92672">=</span> <span style="color:#ae81ff">10</span>
+</span></span><span style="display:flex;"><span>      volume_type           <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;gp2&#34;</span>
+</span></span><span style="display:flex;"><span>      delete_on_termination <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">network_interfaces</span> {
+</span></span><span style="display:flex;"><span>    security_groups             <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">sg_gitlab_id</span>]
+</span></span><span style="display:flex;"><span>    associate_public_ip_address <span style="color:#f92672">=</span> <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h3 id="the-user-data-script">The user-data script</h3>
+<p>The user-data script performs the full GitLab installation and configuration at boot time:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e">#!/usr/bin/env bash
+</span></span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>set -x -e
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>exec &gt; &gt;<span style="color:#f92672">(</span>tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console<span style="color:#f92672">)</span> 2&gt;&amp;<span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>sudo apt-get update -y
+</span></span><span style="display:flex;"><span>sudo apt-get upgrade -y
+</span></span><span style="display:flex;"><span>sudo apt-get install -y <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  curl openssh-server ca-certificates tzdata perl nfs-common
+</span></span></code></pre></div><p>First, it installs the required packages including <code>nfs-common</code> for mounting the EFS filesystem.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>mkdir /var/opt/gitlab-nfs
+</span></span><span style="display:flex;"><span>echo <span style="color:#e6db74">&#39;${efs_dns_name}:/ /var/opt/gitlab-nfs nfs4 ...&#39;</span> &gt;&gt; /etc/fstab
+</span></span><span style="display:flex;"><span>mount /var/opt/gitlab-nfs
+</span></span></code></pre></div><p>The EFS filesystem is mounted at <code>/var/opt/gitlab-nfs</code>. The NFS mount options (<code>hard,rsize=1048576,wsize=1048576</code>) are the recommended settings from AWS for maximum throughput.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>curl https://packages.gitlab.com/install/repositories/gitlab/gitlab-ee/script.deb.sh | sudo bash
+</span></span><span style="display:flex;"><span>EXTERNAL_URL<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;http://</span><span style="color:#e6db74">${</span>alb_dns_name<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span> apt-get install gitlab-ee
+</span></span></code></pre></div><p>GitLab EE is installed with the <code>EXTERNAL_URL</code> set to the external ALB&rsquo;s DNS name. This is the URL users will use to access GitLab.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>cat <span style="color:#e6db74">&lt;&lt; EOF &gt;&gt; /etc/gitlab/gitlab.rb
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">letsencrypt[&#39;enable&#39;] = false
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">postgresql[&#39;enable&#39;] = false
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;db_adapter&#39;] = &#34;postgresql&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;db_encoding&#39;] = &#34;unicode&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;db_database&#39;] = &#34;gitlabhq_production&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;db_username&#39;] = &#34;${postgres_user}&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;db_password&#39;] = &#34;${postgres_pass}&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;db_host&#39;] = &#34;${postgres_address}&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">redis[&#39;enable&#39;] = false
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;redis_host&#39;] = &#34;${redis_address}&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;redis_port&#39;] = 6379
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitaly[&#39;configuration&#39;] = {
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">  storage: [
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">    {
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">      name: &#39;default&#39;,
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">      path: &#39;/var/opt/gitlab-nfs/gitlab-data/git-data/repositories&#39;,
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">    },
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">  ],
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">}
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;uploads_directory&#39;] = &#39;/var/opt/gitlab-nfs/gitlab-data/uploads&#39;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_rails[&#39;shared_path&#39;] = &#39;/var/opt/gitlab-nfs/gitlab-data/shared&#39;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">gitlab_ci[&#39;builds_directory&#39;] = &#39;/var/opt/gitlab-nfs/gitlab-data/builds&#39;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">EOF</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>gitlab-ctl reconfigure
+</span></span></code></pre></div><p>The <code>gitlab.rb</code> configuration disables the built-in PostgreSQL and Redis (we use the managed services instead), points all data directories to the EFS mount, and disables Let&rsquo;s Encrypt (TLS is not configured in this setup). The <code>gitlab-ctl reconfigure</code> command applies the configuration.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>sudo gitlab-rake <span style="color:#e6db74">&#34;gitlab:password:reset[root]&#34;</span> <span style="color:#e6db74">&lt;&lt; EOF
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">${gitlab_pass}
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">${gitlab_pass}
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">EOF</span>
+</span></span></code></pre></div><p>Finally, the root password is set to the value from the <code>TF_VAR_gitlab_pass</code> environment variable.</p>
+<h2 id="gitlab-runners">GitLab Runners</h2>
+<p>Runners are the CI/CD execution agents. They poll GitLab for jobs, execute them in Docker containers, and push results back. They run in the GitLab private subnets and communicate with GitLab through the <strong>internal ALB</strong> — never through the internet.</p>
+<h3 id="runner-user-data">Runner user-data</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e">#!/usr/bin/env bash
+</span></span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>set -x -e
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>exec &gt; &gt;<span style="color:#f92672">(</span>tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console<span style="color:#f92672">)</span> 2&gt;&amp;<span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>sudo apt-get update -y
+</span></span><span style="display:flex;"><span>sudo apt-get upgrade -y
+</span></span><span style="display:flex;"><span>sudo apt-get install -y git docker.io
+</span></span><span style="display:flex;"><span>service docker start
+</span></span><span style="display:flex;"><span>cd /tmp
+</span></span><span style="display:flex;"><span>curl -LJO <span style="color:#e6db74">&#34;https://gitlab-runner-downloads.s3.amazonaws.com/latest/deb/gitlab-runner_amd64.deb&#34;</span>
+</span></span><span style="display:flex;"><span>dpkg -i gitlab-runner_amd64.deb
+</span></span><span style="display:flex;"><span>gitlab-runner register <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --non-interactive <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --url <span style="color:#e6db74">&#34;http://</span><span style="color:#e6db74">${</span>alb_internal_dns_name<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --clone-url <span style="color:#e6db74">&#34;http://</span><span style="color:#e6db74">${</span>alb_internal_dns_name<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --registration-token <span style="color:#e6db74">&#34;</span><span style="color:#e6db74">${</span>gitlab_token<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --executor <span style="color:#e6db74">&#34;docker&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --docker-image <span style="color:#e6db74">&#34;docker:29.4.1&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --description <span style="color:#e6db74">&#34;docker-runner&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --docker-privileged <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --docker-volumes <span style="color:#e6db74">&#34;/certs/client&#34;</span>
+</span></span></code></pre></div><p>The runner installs Docker and the GitLab Runner package, then registers itself with GitLab using the internal ALB URL. Both <code>--url</code> and <code>--clone-url</code> point to the internal ALB, so all communication stays within the VPC. The <code>--executor &quot;docker&quot;</code> flag means jobs run inside Docker containers, and <code>--docker-privileged</code> enables Docker-in-Docker for building container images in CI pipelines.</p>
+<h2 id="security-group-rules">Security group rules</h2>
+<p>This infrastructure has 7 security groups with tightly scoped rules. Here is a summary of the traffic flows:</p>
+<pre class="mermaid">
+  graph TB
+    You[Your IP] -- &#34;SSH :22&#34; --&gt; BASTION[Bastion SG]
+    BASTION -. &#34;SSH :22&#34; .-&gt; GITLAB[GitLab SG]
+    BASTION -. &#34;SSH :22&#34; .-&gt; RUNNER[Runner SG]
+
+    Internet((Internet)) -- &#34;HTTP :80&#34; --&gt; ALBEXT[External ALB SG]
+    ALBEXT -- &#34;HTTP :80&#34; --&gt; GITLAB
+
+    RUNNER -- &#34;HTTP :80&#34; --&gt; ALBINT[Internal ALB SG]
+    ALBINT -- &#34;HTTP :80&#34; --&gt; GITLAB
+
+    GITLAB -- &#34;Redis :6379&#34; --&gt; REDISSG[Redis SG]
+    GITLAB -- &#34;PostgreSQL :5432&#34; --&gt; PGSG[PostgreSQL SG]
+    GITLAB -- &#34;NFS :2049&#34; --&gt; EFSSG[EFS SG]
+</pre>
+
+<p>Every ingress rule uses <code>source_security_group_id</code> rather than CIDR blocks, so the rules follow the instances regardless of their IP addresses.</p>
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>aws-terraform-gitlab/
+├── modules/
+│   ├── network/              # VPC, subnets, IGW, NAT, SGs, IAM, EFS
+│   │   ├── main.tf
+│   │   ├── sg.tf             # 7 security groups
+│   │   ├── efs.tf            # EFS filesystem + mount targets
+│   │   ├── iam.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   ├── bastion/              # ASG min:1 max:1, EIP re-association
+│   ├── database/             # ElastiCache Redis + RDS PostgreSQL
+│   ├── gitlab/               # GitLab EC2, both ALBs, user-data
+│   │   ├── main.tf
+│   │   ├── alb.tf            # External + Internal ALBs
+│   │   ├── user-data.sh
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   └── runner/               # Runner EC2, Docker executor
+│       ├── main.tf
+│       ├── user-data.sh
+│       ├── outputs.tf
+│       ├── providers.tf
+│       └── variables.tf
+└── envs/
+    └── dev/
+        ├── 01-network/
+        ├── 02-bastion/
+        ├── 03-database/
+        ├── 04-gitlab/
+        └── 05-runner/
+</code></pre><h2 id="deploy-the-infrastructure">Deploy the infrastructure</h2>
+<h3 id="prepare-your-variables">Prepare your variables</h3>
+<p>Create a file at <code>~/terraform/aws-terraform-gitlab/terraform_vars_dev_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_aws_profile<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;gitlab/dev/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_bastion<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;gitlab/dev/bastion/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_database<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;gitlab/dev/database/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_gitlab<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;gitlab/dev/gitlab/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_runner<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;gitlab/dev/runner/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_postgres_user<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;gitlab&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_postgres_pass<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_gitlab_pass<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 XXXX&#34;</span>
+</span></span><span style="display:flex;"><span>MY_IP<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -s ifconfig.co/<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_ip_address<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$MY_IP<span style="color:#e6db74">/32&#34;</span>
+</span></span></code></pre></div><p>Replace the <code>XXXX</code> values with your own passwords.</p>
+<h3 id="build-the-infrastructure-without-the-runner">Build the infrastructure (without the Runner)</h3>
+<p>Deploy the first four stacks:</p>
+<pre><code>$ cd envs/dev/01-network
+$ make apply
+$ cd ../02-bastion
+$ make apply
+$ cd ../03-database
+$ make apply
+$ cd ../04-gitlab
+$ make apply
+</code></pre>
+<p>GitLab takes several minutes to install. You can monitor the progress by tailing the user-data log via the bastion:</p>
+<pre><code>$ ssh -J ec2-user@&lt;bastion_eip&gt; ubuntu@&lt;gitlab_private_ip&gt; tail -f /var/log/user-data.log
+</code></pre>
+<h3 id="access-gitlab">Access GitLab</h3>
+<p>Once the installation completes, get the external ALB DNS name:</p>
+<pre><code>$ aws --profile dev elbv2 describe-load-balancers --names alb-gitlab-external-dev \
+    --query 'LoadBalancers[*].DNSName' \
+    --output text
+</code></pre>
+<p>Open your browser and navigate to <code>http://&lt;alb_dns_name&gt;</code>. Log in with the user <code>root</code> and the password you set in <code>TF_VAR_gitlab_pass</code>.</p>
+<h3 id="deploy-a-runner">Deploy a Runner</h3>
+<p>Before deploying a Runner, you need a registration token from GitLab. In the GitLab web interface, go to <strong>Admin Area</strong> → <strong>CI/CD</strong> → <strong>Runners</strong>, create a new runner, and copy the registration token. Then set it as an environment variable:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_gitlab_token<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_REGISTRATION_TOKEN&#34;</span>
+</span></span></code></pre></div><p>Now deploy the runner:</p>
+<pre><code>$ cd ../05-runner
+$ make apply
+</code></pre>
+<p>Wait a minute, then check the Runners page in GitLab — you should see a new runner registered and ready to accept jobs.</p>
+<h2 id="clean-up">Clean up</h2>
+<p>Destroy in reverse order:</p>
+<pre><code>$ cd envs/dev/05-runner
+$ make destroy
+$ cd ../04-gitlab
+$ make destroy
+$ cd ../03-database
+$ make destroy
+$ cd ../02-bastion
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<h2 id="summary">Summary</h2>
+<p>Congratulations if you have followed this tutorial to the end! You have deployed a complete GitLab instance on AWS with all the enterprise patterns we built up across the previous tutorials: VPC with public and private subnets, a bastion host for SSH access, managed databases (RDS PostgreSQL and ElastiCache Redis), shared storage (EFS), Auto Scaling Groups for self-healing, and two Application Load Balancers — one external for users and one internal for CI/CD runners.</p>
+<p>This is a real-world architecture that demonstrates the power of Infrastructure as Code. Every component — from the VPC to the GitLab configuration — is defined in OpenTofu and can be destroyed and recreated at will.</p>
+<p>In the next tutorial, I will show you how to build a vanilla Kubernetes cluster on AWS using OpenTofu.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+
