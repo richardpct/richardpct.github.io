@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with OpenTofu: Public and Private Subnets with a Database | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">AWS with OpenTofu: Public and Private Subnets with a Database</span></h1>
+
+<h2 class="date">2024/03/16</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/redis">redis</a> <a href="/tags/vpc">vpc</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#how-the-three-stacks-communicate">How the three stacks communicate</a></li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#network-configuration">Network configuration</a></li>
+    <li><a href="#security-group-rules">Security group rules</a></li>
+    <li><a href="#database-configuration">Database configuration</a></li>
+    <li><a href="#webserver-configuration">Webserver configuration</a></li>
+    <li><a href="#the-callers">The callers</a></li>
+    <li><a href="#deploy-the-infrastructure">Deploy the infrastructure</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>In the <a href="/post/2024/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/">previous tutorial</a>, we deployed our infrastructure across multiple environments using modules. In this tutorial, we introduce a much more realistic network topology: a <strong>public subnet</strong> and a <strong>private subnet</strong> within the same VPC.</p>
+<p>The scenario is based on the AWS reference architecture <a href="https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Scenario2.html?shortFooter=true">VPC with Public and Private Subnets (NAT)</a>. You will build:</p>
+<ul>
+<li>A <strong>VPC</strong> with a public subnet and a private subnet</li>
+<li>A <strong>webserver</strong> in the public subnet, running a Python CGI application</li>
+<li>A <strong>Redis database</strong> in the private subnet, counting page requests — only the webserver is allowed to connect to it, enforced by security groups</li>
+<li>A <strong>NAT Gateway</strong> with an Elastic IP in the public subnet, so the database can reach the internet for package updates without being exposed to incoming traffic</li>
+</ul>
+<p>Note: for this exercise I intentionally do not use the ElastiCache managed service. Instead, I install Redis on a plain EC2 instance to keep full control and demonstrate the networking concepts.</p>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto04">GitHub repository</a>.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<pre class="mermaid">
+  graph TB
+    Internet((Internet))
+    You[Your IP]
+
+    subgraph VPC[VPC 10.0.0.0/16]
+        IGW[Internet Gateway]
+
+        subgraph Public[Public Subnet - 10.0.0.0/24]
+            NAT[NAT Gateway + EIP]
+            WEB[&#34;Webserver EC2&lt;br/&gt;Amazon Linux&lt;br/&gt;Python HTTP :8000&#34;]
+            WEBEIP[Elastic IP]
+        end
+
+        subgraph Private[Private Subnet - 10.0.1.0/24]
+            DB[&#34;Database EC2&lt;br/&gt;Ubuntu&lt;br/&gt;Redis :6379&#34;]
+        end
+    end
+
+    You -- &#34;SSH :22&#34; --&gt; IGW
+    Internet -- &#34;HTTP :8000&#34; --&gt; IGW
+    IGW &lt;--&gt; WEBEIP
+    WEBEIP &lt;--&gt; WEB
+    WEB -- &#34;Redis :6379&#34; --&gt; DB
+    DB -- &#34;HTTP/HTTPS outbound&#34; --&gt; NAT
+    NAT --&gt; IGW
+</pre>
+
+<p>The key concept is the difference between the two subnets. A <strong>public subnet</strong> has its default route pointing to the Internet Gateway — instances inside can be reached from the internet and can reach it directly. A <strong>private subnet</strong> has its default route pointing to the NAT Gateway — instances can reach the internet (for updates) but cannot be reached from outside. This is why the database is safe in the private subnet: only the webserver can talk to it, via the security group rules.</p>
+<h2 id="how-the-three-stacks-communicate">How the three stacks communicate</h2>
+<p>This tutorial introduces a third stack (database), making the state dependency chain longer. Each stack reads the outputs of the previous one from S3:</p>
+<pre class="mermaid">
+  graph LR
+    NET[01-network] --&gt; NETSTATE[network state]
+    DATABASE[02-database] --&gt; DBSTATE[database state]
+    NETSTATE --&gt; DATABASE
+    NETSTATE --&gt; WEBSERVER[03-webserver]
+    DBSTATE --&gt; WEBSERVER
+</pre>
+
+<p>The webserver stack reads from both the network state (to get the subnet and security group IDs) and the database state (to get the database&rsquo;s private IP address for the Redis connection).</p>
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>aws-terraform-tuto04/
+├── modules/
+│   ├── network/              # VPC, subnets, IGW, NAT, route tables, security groups
+│   │   ├── main.tf
+│   │   ├── sg.tf             # All security group rules
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   ├── database/             # Redis EC2 in private subnet
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   ├── user-data.sh      # Redis install and configuration
+│   │   └── variables.tf
+│   └── webserver/            # Python webserver EC2 in public subnet
+│       ├── main.tf
+│       ├── outputs.tf
+│       ├── providers.tf
+│       ├── user-data.sh      # Python CGI app with Redis client
+│       └── variables.tf
+└── envs/
+    └── dev/
+        ├── 01-network/
+        ├── 02-database/
+        └── 03-webserver/
+</code></pre><p>Notice the new <code>database</code> module and the <code>02-database</code> stack inserted between network and webserver. The security groups are now defined in a dedicated <code>sg.tf</code> file within the network module, since both the webserver and database security groups need to reference each other.</p>
+<h2 id="network-configuration">Network configuration</h2>
+<p>The network module now creates two subnets with different routing behaviors.</p>
+<p><strong>Public subnet — routes through the Internet Gateway</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_internet_gateway&#34; &#34;my_igw&#34;</span> {
+</span></span><span style="display:flex;"><span>  vpc_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;my_igw-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_subnet&#34; &#34;public&#34;</span> {
+</span></span><span style="display:flex;"><span>  vpc_id     <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  cidr_block <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_public</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;subnet_public-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_route_table&#34; &#34;route&#34;</span> {
+</span></span><span style="display:flex;"><span>  vpc_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">route</span> {
+</span></span><span style="display:flex;"><span>    cidr_block <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>
+</span></span><span style="display:flex;"><span>    gateway_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_internet_gateway</span>.<span style="color:#66d9ef">my_igw</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;custom_route-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_route_table_association&#34; &#34;public&#34;</span> {
+</span></span><span style="display:flex;"><span>  subnet_id      <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">public</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  route_table_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_route_table</span>.<span style="color:#66d9ef">route</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The public subnet&rsquo;s route table sends all non-local traffic (<code>0.0.0.0/0</code>) to the Internet Gateway. This is what makes it &ldquo;public&rdquo; — instances here can receive incoming connections from the internet.</p>
+<p><strong>NAT Gateway — the bridge for private instances</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_eip&#34; &#34;nat&#34;</span> {
+</span></span><span style="display:flex;"><span>  domain <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;vpc&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;eip_nat-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_nat_gateway&#34; &#34;gw&#34;</span> {
+</span></span><span style="display:flex;"><span>  allocation_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_eip</span>.<span style="color:#66d9ef">nat</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  subnet_id     <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">public</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;nat_gw-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The NAT Gateway lives in the public subnet (it needs internet access itself) and has its own Elastic IP. Private instances route their outbound traffic through it.</p>
+<p><strong>Private subnet — routes through the NAT Gateway</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_subnet&#34; &#34;private&#34;</span> {
+</span></span><span style="display:flex;"><span>  vpc_id     <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  cidr_block <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_private</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;subnet_private-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_default_route_table&#34; &#34;route&#34;</span> {
+</span></span><span style="display:flex;"><span>  default_route_table_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">default_route_table_id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">route</span> {
+</span></span><span style="display:flex;"><span>    cidr_block <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>
+</span></span><span style="display:flex;"><span>    gateway_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_nat_gateway</span>.<span style="color:#66d9ef">gw</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;default_route-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_route_table_association&#34; &#34;private&#34;</span> {
+</span></span><span style="display:flex;"><span>  subnet_id      <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">private</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  route_table_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_default_route_table</span>.<span style="color:#66d9ef">route</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The private subnet&rsquo;s default route points to the NAT Gateway. This means instances in the private subnet can initiate outbound connections (to download packages, for example) but cannot receive incoming connections from the internet. The route tables for both subnets look like this:</p>
+<p><strong>Public subnet route table:</strong></p>
+<table>
+  <thead>
+      <tr>
+          <th>Destination</th>
+          <th>Target</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>10.0.0.0/16</td>
+          <td>local</td>
+      </tr>
+      <tr>
+          <td>0.0.0.0/0</td>
+          <td>Internet Gateway</td>
+      </tr>
+  </tbody>
+</table>
+<p><strong>Private subnet route table:</strong></p>
+<table>
+  <thead>
+      <tr>
+          <th>Destination</th>
+          <th>Target</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>10.0.0.0/16</td>
+          <td>local</td>
+      </tr>
+      <tr>
+          <td>0.0.0.0/0</td>
+          <td>NAT Gateway</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="security-group-rules">Security group rules</h2>
+<p>The security groups enforce strict communication rules between the webserver and the database. They are defined in <code>modules/network/sg.tf</code> because both groups need cross-references: the database ingress rule references the webserver&rsquo;s security group, and the webserver egress rule references the database&rsquo;s security group.</p>
+<pre class="mermaid">
+  graph LR
+    You[Your IP] -- &#34;SSH :22&#34; --&gt; WEB
+    Internet((Internet)) -- &#34;HTTP :8000&#34; --&gt; WEB
+
+    subgraph SGs[Security Group Rules]
+        WEB[Webserver SG] -- &#34;Redis :6379&#34; --&gt; DB[Database SG]
+    end
+
+    DB -- &#34;HTTP/S outbound\nvia NAT&#34; --&gt; Internet
+    WEB -- &#34;HTTP/S outbound&#34; --&gt; Internet
+</pre>
+
+<p>Here are the key rules:</p>
+<p><strong>Database security group</strong> — only the webserver can connect on the Redis port, and the database can only reach the internet for HTTP/HTTPS (package updates):</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;db_from_web_redis&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">redis_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">redis_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">database</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Notice that <code>source_security_group_id</code> references the webserver&rsquo;s security group, not a CIDR block. This means only instances attached to the webserver security group can connect — even if you know the database&rsquo;s IP, you cannot reach it from anywhere else.</p>
+<p><strong>Webserver security group</strong> — accepts SSH only from your IP, HTTP from everywhere, and can reach the database on the Redis port:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;web_from_me_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">cidr_allowed_ssh</span>]
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;web_from_any_http&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">webserver_port</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">webserver_port</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">anywhere</span>
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;web_to_db_redis&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;egress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">redis_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">redis_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">database</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="database-configuration">Database configuration</h2>
+<p>The database module deploys an Ubuntu EC2 instance in the private subnet running Redis. It uses the <code>aws_ami</code> data source to automatically pick the latest Ubuntu Noble 24.04 image.</p>
+<p><strong>modules/database/user-data.sh</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e">#!/usr/bin/env bash
+</span></span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>exec &gt; &gt;<span style="color:#f92672">(</span>tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console<span style="color:#f92672">)</span> 2&gt;&amp;<span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>sudo apt-get update
+</span></span><span style="display:flex;"><span>sudo apt-get -y upgrade
+</span></span><span style="display:flex;"><span>sudo apt-get -y install redis
+</span></span><span style="display:flex;"><span>sudo sed -i -e <span style="color:#e6db74">&#39;s/^\(bind 127.0.0.1.*::1\)/#\1/&#39;</span> /etc/redis/redis.conf
+</span></span><span style="display:flex;"><span>sudo sed -i -e <span style="color:#e6db74">&#39;s/# \(requirepass\) foobared/\1 ${database_pass}/&#39;</span> /etc/redis/redis.conf
+</span></span><span style="display:flex;"><span>sudo systemctl restart redis
+</span></span></code></pre></div><p>The script does three things after installing Redis: it comments out the <code>bind 127.0.0.1</code> line so Redis listens on all network interfaces (not just localhost), sets the password using the <code>${database_pass}</code> variable templated by OpenTofu, and restarts Redis to apply the changes. Even though Redis is listening on all interfaces, the security group ensures only the webserver can actually connect.</p>
+<p>The database module exports its <strong>private IP</strong> address, which the webserver will use to connect:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;database_private_ip&#34;</span> {
+</span></span><span style="display:flex;"><span>  value <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_instance</span>.<span style="color:#66d9ef">database</span>.<span style="color:#66d9ef">private_ip</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="webserver-configuration">Webserver configuration</h2>
+<p>The webserver module deploys an Amazon Linux EC2 instance in the public subnet. It reads remote state from both the network stack (for subnet and security group IDs) and the database stack (for the Redis host IP and SSH key).</p>
+<p><strong>modules/webserver/user-data.sh</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e">#!/usr/bin/env bash
+</span></span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>exec &gt; &gt;<span style="color:#f92672">(</span>tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console<span style="color:#f92672">)</span> 2&gt;&amp;<span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>sudo yum -y update
+</span></span><span style="display:flex;"><span>sudo yum -y upgrade
+</span></span><span style="display:flex;"><span>sudo yum -y install python3-pip
+</span></span><span style="display:flex;"><span>sudo pip install redis
+</span></span><span style="display:flex;"><span>sudo useradd www -s /sbin/nologin
+</span></span><span style="display:flex;"><span>mkdir -p /var/lib/www/cgi-bin
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>cat <span style="color:#e6db74">&lt;&lt; EOF &gt; /var/lib/www/cgi-bin/hello.py
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">#!/usr/bin/env python3
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">import redis
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">r = redis.Redis(
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                host=&#39;${database_host}&#39;,
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                port=6379,
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                password=&#39;${database_pass}&#39;)
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">r.set(&#39;count&#39;, 0)
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">count = r.incr(1)
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">print(&#34;Content-type: text/html&#34;)
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">print(&#34;&#34;)
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">print(&#34;&lt;html&gt;&lt;body&gt;&#34;)
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">print(&#34;&lt;p&gt;Hello World!&lt;br /&gt;counter: &#34; + str(count) + &#34;&lt;br /&gt;env: ${environment}&lt;/p&gt;&#34;)
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">print(&#34;&lt;/body&gt;&lt;/html&gt;&#34;)
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">EOF</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>chmod <span style="color:#ae81ff">755</span> /var/lib/www/cgi-bin/hello.py
+</span></span><span style="display:flex;"><span>cd /var/lib/www
+</span></span><span style="display:flex;"><span>sudo -u www python3 -m http.server <span style="color:#ae81ff">8000</span> --cgi
+</span></span></code></pre></div><p>This script installs the Python Redis client, creates a CGI script at <code>/var/lib/www/cgi-bin/hello.py</code>, and starts Python&rsquo;s built-in HTTP server on port 8000 running as a <code>www</code> user. The CGI script connects to Redis using the database&rsquo;s private IP (injected via <code>${database_host}</code>), increments a counter on each request, and displays the current count along with the environment name.</p>
+<p>The three template variables (<code>${database_host}</code>, <code>${database_pass}</code>, <code>${environment}</code>) are injected by OpenTofu&rsquo;s <code>templatefile()</code> function in the launch template:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_launch_template&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  name      <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;web&#34;</span>
+</span></span><span style="display:flex;"><span>  image_id  <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">aws_ami</span>.<span style="color:#66d9ef">amazonlinux</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  user_data <span style="color:#f92672">=</span> <span style="color:#66d9ef">base64encode</span>(<span style="color:#66d9ef">templatefile</span>(<span style="color:#e6db74">&#34;${path.module}/user-data.sh&#34;</span>, {
+</span></span><span style="display:flex;"><span>    environment   <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">env</span>,
+</span></span><span style="display:flex;"><span>    database_host <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">database</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">database_private_ip</span>,
+</span></span><span style="display:flex;"><span>    database_pass <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">database_pass</span>
+</span></span><span style="display:flex;"><span>  }))
+</span></span><span style="display:flex;"><span>  instance_type <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">instance_type</span>
+</span></span><span style="display:flex;"><span>  key_name      <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">database</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">ssh_key_name</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">network_interfaces</span> {
+</span></span><span style="display:flex;"><span>    subnet_id                   <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_public_id</span>
+</span></span><span style="display:flex;"><span>    security_groups             <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">sg_webserver_id</span>]
+</span></span><span style="display:flex;"><span>    associate_public_ip_address <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="the-callers">The callers</h2>
+<p><strong>envs/dev/01-network/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;network&#34;</span> {
+</span></span><span style="display:flex;"><span>  source           <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../../../modules/network&#34;</span>
+</span></span><span style="display:flex;"><span>  aws_profile      <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">aws_profile</span>
+</span></span><span style="display:flex;"><span>  region           <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  env              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_cidr_block   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.0.0/16&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_public    <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.0.0/24&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_private   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.1.0/24&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_allowed_ssh <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">my_ip_address</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Note the new <code>subnet_private</code> parameter (<code>10.0.1.0/24</code>) alongside the public one (<code>10.0.0.0/24</code>).</p>
+<p><strong>envs/dev/02-database/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;database&#34;</span> {
+</span></span><span style="display:flex;"><span>  source                      <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../../../modules/database&#34;</span>
+</span></span><span style="display:flex;"><span>  aws_profile                 <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">aws_profile</span>
+</span></span><span style="display:flex;"><span>  region                      <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  env                         <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">bucket</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_key    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">key_network</span>
+</span></span><span style="display:flex;"><span>  instance_type               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;t2.micro&#34;</span>
+</span></span><span style="display:flex;"><span>  ssh_public_key              <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">ssh_public_key</span>
+</span></span><span style="display:flex;"><span>  database_pass               <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">database_pass</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p><strong>envs/dev/03-webserver/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;webserver&#34;</span> {
+</span></span><span style="display:flex;"><span>  source                       <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../../../modules/webserver&#34;</span>
+</span></span><span style="display:flex;"><span>  aws_profile                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">aws_profile</span>
+</span></span><span style="display:flex;"><span>  region                       <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  env                          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_bucket  <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">bucket</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_key     <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">key_network</span>
+</span></span><span style="display:flex;"><span>  database_remote_state_bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">bucket</span>
+</span></span><span style="display:flex;"><span>  database_remote_state_key    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">key_database</span>
+</span></span><span style="display:flex;"><span>  instance_type                <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;t2.micro&#34;</span>
+</span></span><span style="display:flex;"><span>  ssh_public_key               <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">ssh_public_key</span>
+</span></span><span style="display:flex;"><span>  database_pass                <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">database_pass</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The webserver caller now references both the network and database remote state keys, since it needs information from both stacks.</p>
+<h2 id="deploy-the-infrastructure">Deploy the infrastructure</h2>
+<p><strong>Prepare your variables</strong></p>
+<p>Create a file at <code>~/terraform/aws-terraform-tuto04/terraform_vars_dev_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_aws_profile<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-04/dev/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_database<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-04/dev/database/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_webserver<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-04/dev/webserver/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 AAAAXXXX&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_database_pass<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX&#34;</span>
+</span></span><span style="display:flex;"><span>MY_IP<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -s ifconfig.co/<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_ip_address<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$MY_IP<span style="color:#e6db74">/32&#34;</span>
+</span></span></code></pre></div><p><strong>Build</strong></p>
+<p>Deploy the three stacks in order:</p>
+<pre><code>$ cd envs/dev/01-network
+$ make apply
+$ cd ../02-database
+$ make apply
+$ cd ../03-webserver
+$ make apply
+</code></pre>
+<p><strong>Test</strong></p>
+<p>Use the Elastic IP from the webserver output:</p>
+<pre><code>$ curl http://xx.xx.xx.xx:8000/cgi-bin/hello.py
+</code></pre>
+<p>You should see:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-html" data-lang="html"><span style="display:flex;"><span>&lt;<span style="color:#f92672">html</span>&gt;&lt;<span style="color:#f92672">body</span>&gt;
+</span></span><span style="display:flex;"><span>&lt;<span style="color:#f92672">p</span>&gt;Hello World!&lt;<span style="color:#f92672">br</span> /&gt;counter: 1&lt;<span style="color:#f92672">br</span> /&gt;env: dev&lt;/<span style="color:#f92672">p</span>&gt;
+</span></span><span style="display:flex;"><span>&lt;/<span style="color:#f92672">body</span>&gt;&lt;/<span style="color:#f92672">html</span>&gt;
+</span></span></code></pre></div><p>Run the command again — the counter increments each time, proving that the webserver is successfully communicating with the Redis database in the private subnet.</p>
+<p><strong>Clean up</strong></p>
+<p>Destroy in reverse order:</p>
+<pre><code>$ cd envs/dev/03-webserver
+$ make destroy
+$ cd ../02-database
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<h2 id="summary">Summary</h2>
+<p>In this tutorial, we introduced the concept of public and private subnets. The webserver lives in the public subnet where it can receive traffic from the internet, while the Redis database is isolated in the private subnet where only the webserver can reach it — enforced both by network routing (NAT Gateway vs Internet Gateway) and by security group rules that reference specific security groups rather than CIDR blocks.</p>
+<p>We also added a third stack (database) to the deployment pipeline, demonstrating how the remote state chain scales: the network exports IDs, the database reads them and exports its own outputs, and the webserver reads from both.</p>
+<p>In the next tutorial, I will introduce a bastion host for SSH access to instances in the private subnet.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+

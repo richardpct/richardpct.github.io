@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with OpenTofu: Building a Kubernetes Cluster with kubeadm | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">AWS with OpenTofu: Building a Kubernetes Cluster with kubeadm</span></h1>
+
+<h2 class="date">2025/03/30</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/kubernetes">kubernetes</a> <a href="/tags/kubeadm">kubeadm</a> <a href="/tags/cilium">cilium</a> <a href="/tags/rook-ceph">rook-ceph</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#network-design">Network design</a></li>
+    <li><a href="#two-load-balancers">Two load balancers</a></li>
+    <li><a href="#spot-instances-for-cost-savings">Spot instances for cost savings</a></li>
+    <li><a href="#efs-as-a-coordination-mechanism">EFS as a coordination mechanism</a></li>
+    <li><a href="#kubernetes-platform-stack">Kubernetes platform stack</a></li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#prepare-your-variables">Prepare your variables</a></li>
+    <li><a href="#deploy-the-infrastructure">Deploy the infrastructure</a>
+      <ul>
+        <li><a href="#step-1--create-the-s3-bucket">Step 1 — Create the S3 bucket</a></li>
+        <li><a href="#step-2--request-the-wildcard-tls-certificate">Step 2 — Request the wildcard TLS certificate</a></li>
+        <li><a href="#step-3--create-the-network">Step 3 — Create the network</a></li>
+        <li><a href="#step-4--create-the-servers">Step 4 — Create the servers</a></li>
+        <li><a href="#step-5--deploy-the-kubernetes-platform">Step 5 — Deploy the Kubernetes platform</a></li>
+      </ul>
+    </li>
+    <li><a href="#testing">Testing</a>
+      <ul>
+        <li><a href="#argocd">ArgoCD</a></li>
+        <li><a href="#metrics-server">Metrics server</a></li>
+        <li><a href="#cilium">Cilium</a></li>
+        <li><a href="#rook-ceph">Rook Ceph</a></li>
+        <li><a href="#test-persistent-storage-with-a-simple-website">Test persistent storage with a simple website</a></li>
+        <li><a href="#check-the-gateway-api">Check the Gateway API</a></li>
+      </ul>
+    </li>
+    <li><a href="#clean-up">Clean up</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>In the <a href="https://richardpct.github.io/post/2024/06/03/aws-with-opentofu-deploying-a-production-gitlab-instance/">previous tutorials</a>, we built increasingly sophisticated AWS infrastructure. In this tutorial, we bring it all together to deploy a <strong>vanilla Kubernetes cluster</strong> using <code>kubeadm</code> on AWS.</p>
+<p>This is intended as a learning exercise to show you how to build a complex architecture on AWS — in production, you would prefer using EKS (the managed Kubernetes service). But understanding what happens under the hood gives you the skills to troubleshoot and customize any Kubernetes setup.</p>
+<p>Here is what we build:</p>
+<ul>
+<li>A <strong>high-availability Kubernetes cluster</strong> with 3 control planes and 3 workers, bootstrapped with <code>kubeadm</code></li>
+<li><strong>Cilium</strong> as the CNI (replacing kube-proxy), with Gateway API support, Hubble observability, and WireGuard encryption</li>
+<li><strong>Rook Ceph</strong> as the storage system, providing block, filesystem, and object storage classes</li>
+<li><strong>Gateway API</strong> for HTTPS ingress, backed by a Let&rsquo;s Encrypt wildcard certificate</li>
+<li><strong>ArgoCD</strong> for GitOps application delivery, deploying a metrics server</li>
+<li><strong>Spot instances</strong> instead of regular EC2 instances, to keep costs down</li>
+<li><strong>Dual architecture support</strong> — the code supports both AMD64 and ARM64, and both Amazon Linux and Ubuntu</li>
+</ul>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-vanilla-kubernetes">GitHub repository</a>.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<pre class="mermaid">
+  graph TB
+    Internet((Internet))
+    You[Your IP]
+
+    subgraph VPC[VPC 10.0.0.0/16]
+        IGW[Internet Gateway]
+
+        subgraph PubSubs[&#34;Public Subnets - 10.0.7-9.0/24 - 3 AZs&#34;]
+            BASTION[&#34;Bastion EC2 - spot&#34;]
+            ALBExt[&#34;External NLB&#34;]
+            NAT[&#34;3x NAT Gateways&#34;]
+        end
+
+        subgraph PrivSubs[&#34;Private Subnets - 10.0.1-3.0/24 - 3 AZs&#34;]
+            ALBInt[&#34;Internal NLB&#34;]
+            CP[&#34;3x Control Planes - spot&#34;]
+            WORKER[&#34;3x Workers - spot + extra disk&#34;]
+        end
+
+        subgraph EFSSubs[&#34;Private EFS Subnets - 10.0.4-6.0/24 - 3 AZs&#34;]
+            EFS[&#34;EFS - kubeadm join scripts + kubeconfig&#34;]
+        end
+
+        PubSubs ~~~ PrivSubs
+        PrivSubs ~~~ EFSSubs
+    end
+
+    You -- &#34;SSH :22&#34; --&gt; IGW
+    IGW -- &#34;SSH :22&#34; --&gt; BASTION
+    You -- &#34;kubectl :6443&#34; --&gt; IGW
+    IGW --&gt; ALBExt
+    ALBExt -- &#34;:6443&#34; --&gt; CP
+    Internet -- &#34;HTTPS :443&#34; --&gt; IGW
+    ALBExt -- &#34;:30443 hostNetwork&#34; --&gt; WORKER
+    BASTION -. &#34;SSH&#34; .-&gt; CP
+    BASTION -. &#34;SSH&#34; .-&gt; WORKER
+    BASTION -- &#34;NFS :2049&#34; --&gt; EFS
+    CP -- &#34;NFS :2049&#34; --&gt; EFS
+    WORKER -- &#34;NFS :2049&#34; --&gt; EFS
+    CP --&gt; ALBInt
+    WORKER -- &#34;:6443&#34; --&gt; ALBInt
+    ALBInt -- &#34;:6443&#34; --&gt; CP
+    CP -- &#34;outbound&#34; --&gt; NAT
+    WORKER -- &#34;outbound&#34; --&gt; NAT
+    NAT --&gt; IGW
+</pre>
+
+<h2 id="network-design">Network design</h2>
+<p>The network has 3 subnet groups across 3 Availability Zones:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Subnet group</th>
+          <th>CIDR blocks</th>
+          <th>Contents</th>
+          <th>Internet access</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Public</td>
+          <td>10.0.7.0/24, 10.0.8.0/24, 10.0.9.0/24</td>
+          <td>Bastion, External NLB, NAT Gateways</td>
+          <td>Direct via IGW</td>
+      </tr>
+      <tr>
+          <td>Private</td>
+          <td>10.0.1.0/24, 10.0.2.0/24, 10.0.3.0/24</td>
+          <td>Control planes, Workers, Internal NLB</td>
+          <td>Outbound via NAT</td>
+      </tr>
+      <tr>
+          <td>Private EFS</td>
+          <td>10.0.4.0/24, 10.0.5.0/24, 10.0.6.0/24</td>
+          <td>EFS mount targets only</td>
+          <td>None</td>
+      </tr>
+  </tbody>
+</table>
+<p>The EFS subnets are isolated from the NAT Gateway because EFS does not need internet access. One NAT Gateway is created per AZ to maintain availability if an AZ goes down.</p>
+<h2 id="two-load-balancers">Two load balancers</h2>
+<p>Like in the GitLab tutorial, this architecture uses two load balancers — but here they are <strong>Network Load Balancers</strong> (NLB) instead of Application Load Balancers, because we need to forward TCP traffic directly (Kubernetes API on port 6443 and HTTPS on port 443):</p>
+<pre class="mermaid">
+  graph LR
+    You[You / kubectl] -- &#34;:6443&#34; --&gt; LBExt[External NLB]
+    Internet((Internet)) -- &#34;:443 HTTPS&#34; --&gt; LBExt
+    LBExt -- &#34;:6443&#34; --&gt; CP[Control Planes]
+    LBExt -- &#34;:30443 hostNetwork&#34; --&gt; WORKER[Workers]
+    CP -- &#34;:6443&#34; --&gt; LBInt[Internal NLB]
+    WORKER -- &#34;:6443&#34; --&gt; LBInt
+    LBInt -- &#34;:6443&#34; --&gt; CP
+</pre>
+
+<ul>
+<li><strong>External NLB</strong> — internet-facing, with two target groups. It forwards <code>kubectl</code> and API requests on port 6443 to the control planes, and forwards HTTPS traffic on port 443 to the workers on port 30443 (where the Cilium Gateway listens in hostNetwork mode — the gateway pod binds directly to the host&rsquo;s network interface, bypassing kube-proxy entirely).</li>
+<li><strong>Internal NLB</strong> — private, forwards port 6443 to the control planes. This is the <code>controlPlaneEndpoint</code> used by <code>kubeadm</code> — all Kubernetes internal traffic (kubelet to API, pods to API) goes through this internal NLB, keeping it off the public internet.</li>
+</ul>
+<h2 id="spot-instances-for-cost-savings">Spot instances for cost savings</h2>
+<p>All 7 EC2 instances (1 bastion, 3 control planes, 3 workers) use <strong>spot instances</strong> instead of on-demand instances. Spot instances use spare AWS capacity at up to 90% discount, with the caveat that AWS can reclaim them with a 2-minute notice.</p>
+<p>Since we have 3 control planes and 3 workers across 3 AZs, the cluster tolerates losing individual instances — the ASG will replace them. The maximum spot prices are configured per instance type:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Role</th>
+          <th>Instance type (AMD64)</th>
+          <th>Max spot price</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>Bastion</td>
+          <td>t3.nano</td>
+          <td>$0.001/hr</td>
+      </tr>
+      <tr>
+          <td>Control Plane</td>
+          <td>t3.small</td>
+          <td>$0.010/hr</td>
+      </tr>
+      <tr>
+          <td>Worker</td>
+          <td>t3.medium</td>
+          <td>$0.020/hr</td>
+      </tr>
+  </tbody>
+</table>
+<p>The workers get a 20 GB root disk and an additional 15 GB EBS volume — this extra disk is used by Rook Ceph as an OSD (Object Storage Daemon) for providing persistent storage to the cluster.</p>
+<h2 id="efs-as-a-coordination-mechanism">EFS as a coordination mechanism</h2>
+<p>EFS plays a clever role in this architecture. When 3 control planes and 3 workers boot simultaneously, they need to coordinate: only one control plane should run <code>kubeadm init</code>, and the others need to wait for the join commands.</p>
+<p>The solution uses EFS as a shared filesystem mounted at <code>/nfs</code> on all instances:</p>
+<pre class="mermaid">
+  graph TB
+    subgraph Boot[&#34;All 6 instances boot simultaneously&#34;]
+        CP1[&#34;Control Plane 1&#34;]
+        CP2[&#34;Control Plane 2&#34;]
+        CP3[&#34;Control Plane 3&#34;]
+        W1[&#34;Worker 1&#34;]
+        W2[&#34;Worker 2&#34;]
+        W3[&#34;Worker 3&#34;]
+    end
+
+    subgraph EFS[&#34;EFS /nfs&#34;]
+        FIRST[&#34;/nfs/first&#34;]
+        MASTER[&#34;/nfs/master.sh&#34;]
+        WORKERSH[&#34;/nfs/worker.sh&#34;]
+        CONFIG[&#34;/nfs/config&#34;]
+    end
+
+    CP1 -- &#34;1. Creates /nfs/first\n2. Runs kubeadm init\n3. Writes join scripts&#34; --&gt; EFS
+    CP2 -- &#34;Finds /nfs/first exists\nWaits for /nfs/master.sh\nRuns it to join&#34; --&gt; EFS
+    CP3 -- &#34;Finds /nfs/first exists\nWaits for /nfs/master.sh\nRuns it to join&#34; --&gt; EFS
+    W1 -- &#34;Waits for /nfs/worker.sh\nRuns it to join&#34; --&gt; EFS
+    W2 -- &#34;Waits for /nfs/worker.sh\nRuns it to join&#34; --&gt; EFS
+    W3 -- &#34;Waits for /nfs/worker.sh\nRuns it to join&#34; --&gt; EFS
+</pre>
+
+<p>The first control plane to boot creates <code>/nfs/first</code> as a lock file, runs <code>kubeadm init</code>, then writes the join commands to <code>/nfs/master.sh</code> and <code>/nfs/worker.sh</code>. The other control planes detect that <code>/nfs/first</code> already exists, wait for <code>/nfs/master.sh</code> to appear, and execute it. The workers wait for <code>/nfs/worker.sh</code> and execute it. The kubeconfig is also saved to <code>/nfs/config</code> so OpenTofu can later copy it to your local machine.</p>
+<p>The <code>kubeadm init</code> command uses the internal NLB as the <code>controlPlaneEndpoint</code>, so all cluster-internal communication stays private:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>kubeadm init <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --control-plane-endpoint <span style="color:#e6db74">&#34;</span><span style="color:#e6db74">${</span>kube_api_internal<span style="color:#e6db74">}</span><span style="color:#e6db74">:6443&#34;</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --skip-phases<span style="color:#f92672">=</span>addon/kube-proxy <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --apiserver-cert-extra-sans<span style="color:#f92672">=</span><span style="color:#e6db74">${</span>kube_api_external<span style="color:#e6db74">}</span>,<span style="color:#e6db74">${</span>kube_api_internal<span style="color:#e6db74">}</span> <span style="color:#ae81ff">\
+</span></span></span><span style="display:flex;"><span>  --upload-certs
+</span></span></code></pre></div><p>The <code>--skip-phases=addon/kube-proxy</code> flag is important — Cilium replaces kube-proxy entirely.</p>
+<h2 id="kubernetes-platform-stack">Kubernetes platform stack</h2>
+<p>Once the cluster is bootstrapped, the <code>04-kubernetes</code> stack deploys the platform components via Helm and kubectl manifests:</p>
+<ol>
+<li><strong>TLS Secret</strong> — the Let&rsquo;s Encrypt wildcard certificate is stored as a Kubernetes secret in <code>kube-system</code></li>
+<li><strong>Gateway API CRDs</strong> — installed before Cilium, since Cilium needs them for Gateway API support</li>
+<li><strong>Cilium</strong> — deployed with kube-proxy replacement, Gateway API, Hubble (DNS, TCP, flow, HTTP metrics), WireGuard encryption, and Prometheus metrics</li>
+<li><strong>Cilium Gateway</strong> — a <code>Gateway</code> resource listening on port 30443 in hostNetwork mode for HTTPS traffic with the wildcard certificate. Because <code>gatewayAPI.hostNetwork.enabled</code> is set in the Cilium Helm values, the gateway pod binds directly to the worker&rsquo;s network interface rather than using a NodePort service.</li>
+<li><strong>Rook Ceph Operator</strong> — manages the Ceph cluster lifecycle</li>
+<li><strong>Rook Ceph Cluster</strong> — provisions the Ceph storage cluster using the workers&rsquo; extra EBS volumes, creating three storage classes: <code>ceph-block</code>, <code>ceph-filesystem</code>, and <code>ceph-bucket</code></li>
+<li><strong>ArgoCD</strong> — with 2 server replicas and HTTPRoute for <code>argocd.yourdomain.com</code></li>
+<li><strong>ArgoCD Apps</strong> — registers the metrics server for GitOps delivery</li>
+</ol>
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>aws-vanilla-kubernetes/
+├── modules/
+│   ├── bucket/                   # S3 bucket for remote state
+│   ├── certificate/              # Let&#39;s Encrypt wildcard certificate
+│   ├── network/                  # VPC, subnets, NLBs, security groups, DNS
+│   │   ├── main.tf              # VPC, subnets, IGW, NAT, routes
+│   │   ├── sg.tf                # 6 security groups
+│   │   ├── dns.tf               # Route 53 records
+│   │   └── alb.tf               # External + Internal NLBs
+│   ├── servers/                  # EC2 instances, EFS, kubeconfig retrieval
+│   │   ├── main.tf              # Launch templates, ASGs, spot config
+│   │   ├── efs.tf               # EFS filesystem + mount targets
+│   │   ├── amazonlinux/         # User-data scripts for Amazon Linux
+│   │   └── ubuntu/              # User-data scripts for Ubuntu
+│   └── kubernetes/              # Helm releases, Gateway API, TLS
+│       ├── main.tf
+│       ├── helm-values/         # Cilium, ArgoCD values
+│       └── manifests/           # Gateway, HTTPRoute templates
+└── cluster-01/                  # Concrete cluster instance
+    ├── 00-bucket/
+    ├── 01-certificate/
+    ├── 02-network/
+    ├── 03-servers/
+    └── 04-kubernetes/
+</code></pre><p>The servers module supports both Amazon Linux and Ubuntu — the <code>distribution</code> local variable selects which user-data scripts to use.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>An AWS account with a registered domain in Route 53</li>
+<li>AWS credentials configured locally (<code>~/.aws/config</code> and <code>~/.aws/credentials</code>)</li>
+<li>OpenTofu installed (version 1.11.x or higher)</li>
+<li><code>kubectl</code> and <code>cilium</code> CLI installed:</li>
+</ul>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e"># macOS</span>
+</span></span><span style="display:flex;"><span>brew install kubernetes-cli cilium
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Linux</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># See official docs for kubectl and cilium installation</span>
+</span></span></code></pre></div><h2 id="prepare-your-variables">Prepare your variables</h2>
+<p>Create a file at <code>~/terraform/aws-vanilla-kubernetes/terraform_vars_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_aws_profile<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_certificate<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;kubernetes/certificate/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;kubernetes/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_servers<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;kubernetes/servers/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_kubernetes<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;kubernetes/kubernetes/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_domain<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;yourdomain.com&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_email<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;you@example.com&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 XXXX&#34;</span>
+</span></span><span style="display:flex;"><span>MY_IP<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -s ifconfig.co/<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_ip_address<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$MY_IP<span style="color:#e6db74">/32&#34;</span>
+</span></span></code></pre></div><h2 id="deploy-the-infrastructure">Deploy the infrastructure</h2>
+<h3 id="step-1--create-the-s3-bucket">Step 1 — Create the S3 bucket</h3>
+<pre><code>$ cd cluster-01/00-bucket
+$ make apply
+</code></pre>
+<h3 id="step-2--request-the-wildcard-tls-certificate">Step 2 — Request the wildcard TLS certificate</h3>
+<pre><code>$ cd ../01-certificate
+$ make apply
+</code></pre>
+<p>This uses the ACME provider to request a <code>*.yourdomain.com</code> certificate from Let&rsquo;s Encrypt via DNS-01 challenge on Route 53.</p>
+<h3 id="step-3--create-the-network">Step 3 — Create the network</h3>
+<pre><code>$ cd ../02-network
+$ make apply
+</code></pre>
+<h3 id="step-4--create-the-servers">Step 4 — Create the servers</h3>
+<pre><code>$ cd ../03-servers
+$ make apply
+</code></pre>
+<p>This is the longest step. It creates the EFS filesystem, launches 7 spot instances (1 bastion, 3 control planes, 3 workers), waits for the primary control plane to finish <code>kubeadm init</code>, copies the kubeconfig to <code>~/.kube/config-aws</code>, and downloads the Rook Ceph Helm values.</p>
+<p>Set your kubeconfig to use the new cluster:</p>
+<pre><code>$ export KUBECONFIG=~/.kube/config-aws
+</code></pre>
+<p>Wait for all nodes to appear (they will show <code>NotReady</code> until Cilium is installed):</p>
+<pre><code>$ kubectl get nodes
+</code></pre>
+<h3 id="step-5--deploy-the-kubernetes-platform">Step 5 — Deploy the Kubernetes platform</h3>
+<pre><code>$ cd ../04-kubernetes
+$ make apply
+</code></pre>
+<p>This installs Cilium, Gateway API, Rook Ceph, ArgoCD, and registers the metrics server application.</p>
+<h2 id="testing">Testing</h2>
+<h3 id="argocd">ArgoCD</h3>
+<p>Get the default admin password:</p>
+<pre><code>$ kubectl -n argocd get secrets argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+</code></pre>
+<p>Open <code>https://argocd.yourdomain.com</code> in your browser and log in with user <code>admin</code>. You should see the metrics server application deployed and synced:</p>
+<pre><code>$ kubectl -n argocd get applications
+</code></pre>
+<h3 id="metrics-server">Metrics server</h3>
+<pre><code>$ kubectl top nodes
+</code></pre>
+<h3 id="cilium">Cilium</h3>
+<p>Check the status and run the connectivity test:</p>
+<pre><code>$ cilium status
+$ cilium connectivity test
+</code></pre>
+<p>Launch the Hubble UI:</p>
+<pre><code>$ cilium hubble ui
+</code></pre>
+<h3 id="rook-ceph">Rook Ceph</h3>
+<p>Check that the storage classes are created:</p>
+<pre><code>$ kubectl get sc
+</code></pre>
+<p>You should see <code>ceph-block</code> (default), <code>ceph-filesystem</code>, and <code>ceph-bucket</code>.</p>
+<h3 id="test-persistent-storage-with-a-simple-website">Test persistent storage with a simple website</h3>
+<p>To verify Rook Ceph works, deploy a simple Nginx website that uses a CephFS persistent volume shared by 2 pods. Create a file called <code>www2-manifest.yaml</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Namespace</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span>---
+</span></span><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">PersistentVolumeClaim</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">cephfs-pvc</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">accessModes</span>:
+</span></span><span style="display:flex;"><span>    - <span style="color:#ae81ff">ReadWriteMany</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">resources</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">requests</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">storage</span>: <span style="color:#ae81ff">1Gi</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">storageClassName</span>: <span style="color:#ae81ff">ceph-filesystem</span>
+</span></span><span style="display:flex;"><span>---
+</span></span><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">apps/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Deployment</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">labels</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">app</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">replicas</span>: <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">selector</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">matchLabels</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">app</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">template</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">labels</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">app</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">containers</span>:
+</span></span><span style="display:flex;"><span>      - <span style="color:#f92672">image</span>: <span style="color:#ae81ff">nginx</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">name</span>: <span style="color:#ae81ff">nginx</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">volumeMounts</span>:
+</span></span><span style="display:flex;"><span>          - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">mypvc</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">mountPath</span>: <span style="color:#ae81ff">/usr/share/nginx/html</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">volumes</span>:
+</span></span><span style="display:flex;"><span>        - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">mypvc</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">persistentVolumeClaim</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">claimName</span>: <span style="color:#ae81ff">cephfs-pvc</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">readOnly</span>: <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span>---
+</span></span><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">Service</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">labels</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">app</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">ports</span>:
+</span></span><span style="display:flex;"><span>  - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">http</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">port</span>: <span style="color:#ae81ff">80</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">protocol</span>: <span style="color:#ae81ff">TCP</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">targetPort</span>: <span style="color:#ae81ff">80</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">selector</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">app</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">type</span>: <span style="color:#ae81ff">ClusterIP</span>
+</span></span><span style="display:flex;"><span>---
+</span></span><span style="display:flex;"><span><span style="color:#f92672">apiVersion</span>: <span style="color:#ae81ff">gateway.networking.k8s.io/v1</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">kind</span>: <span style="color:#ae81ff">HTTPRoute</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">metadata</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">name</span>: <span style="color:#ae81ff">https-www2</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">parentRefs</span>:
+</span></span><span style="display:flex;"><span>  - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">tls-gateway</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">namespace</span>: <span style="color:#ae81ff">kube-system</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">hostnames</span>:
+</span></span><span style="display:flex;"><span>  - <span style="color:#e6db74">&#34;www2.yourdomain.com&#34;</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">rules</span>:
+</span></span><span style="display:flex;"><span>  - <span style="color:#f92672">matches</span>:
+</span></span><span style="display:flex;"><span>    - <span style="color:#f92672">path</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">type</span>: <span style="color:#ae81ff">PathPrefix</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">value</span>: <span style="color:#ae81ff">/</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">backendRefs</span>:
+</span></span><span style="display:flex;"><span>    - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">www2</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">port</span>: <span style="color:#ae81ff">80</span>
+</span></span></code></pre></div><p>Apply it and create a page:</p>
+<pre><code>$ kubectl apply -f www2-manifest.yaml
+$ kubectl -n www2 get pvc
+</code></pre>
+<p>Wait for the PVC to show <code>Bound</code>, then write content to the shared volume:</p>
+<pre><code>$ kubectl -n www2 exec -it $(kubectl -n www2 get po -o name | head -1) -- sh -c 'echo &quot;hello world&quot; &gt; /usr/share/nginx/html/index.html'
+</code></pre>
+<p>Test it:</p>
+<pre><code>$ curl https://www2.yourdomain.com
+</code></pre>
+<p>Both pods serve the same content because they share the CephFS volume — this is the <code>ReadWriteMany</code> access mode in action.</p>
+<h3 id="check-the-gateway-api">Check the Gateway API</h3>
+<pre><code>$ kubectl -n kube-system get gateways
+$ kubectl get httproutes -A
+</code></pre>
+<p>You should see the <code>tls-gateway</code> in <code>kube-system</code> and HTTPRoutes for both ArgoCD and www2.</p>
+<h2 id="clean-up">Clean up</h2>
+<p>Destroy in reverse order:</p>
+<pre><code>$ cd cluster-01/04-kubernetes
+$ make destroy
+$ cd ../03-servers
+$ make destroy
+$ cd ../02-network
+$ make destroy
+$ cd ../01-certificate
+$ make destroy
+$ cd ../00-bucket
+$ make destroy
+</code></pre>
+<h2 id="summary">Summary</h2>
+<p>In this tutorial, we built a complete Kubernetes cluster on AWS from scratch using <code>kubeadm</code>, applying everything learned in the previous tutorials: VPC with public and private subnets, a bastion host, dual load balancers, Auto Scaling Groups, and spot instances for cost savings.</p>
+<p>The key technique was using EFS as a coordination mechanism — the first control plane to boot initializes the cluster and shares the join commands via a shared NFS mount, allowing the other 5 instances to self-assemble into a cluster without any manual intervention.</p>
+<p>By using spot instances, you can run a 7-node Kubernetes cluster with Rook Ceph storage, Cilium networking, ArgoCD, and HTTPS ingress for a fraction of the on-demand cost.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+

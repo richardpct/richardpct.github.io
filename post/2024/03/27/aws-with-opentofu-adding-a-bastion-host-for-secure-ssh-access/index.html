@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with OpenTofu: Adding a Bastion Host for Secure SSH Access | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">AWS with OpenTofu: Adding a Bastion Host for Secure SSH Access</span></h1>
+
+<h2 class="date">2024/03/27</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/bastion">bastion</a> <a href="/tags/security">security</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#ssh-access-flow">SSH access flow</a></li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#what-changed-from-tutorial-04">What changed from tutorial 04</a>
+      <ul>
+        <li><a href="#four-subnets-instead-of-two">Four subnets instead of two</a></li>
+        <li><a href="#ssh-rules-now-go-through-the-bastion">SSH rules now go through the bastion</a></li>
+        <li><a href="#the-bastion-module">The bastion module</a></li>
+        <li><a href="#shared-ssh-key-via-remote-state">Shared SSH key via remote state</a></li>
+      </ul>
+    </li>
+    <li><a href="#stack-dependency-chain">Stack dependency chain</a></li>
+    <li><a href="#deploy-the-infrastructure">Deploy the infrastructure</a>
+      <ul>
+        <li><a href="#prepare-your-variables">Prepare your variables</a></li>
+        <li><a href="#build">Build</a></li>
+        <li><a href="#test-the-webserver">Test the webserver</a></li>
+        <li><a href="#test-ssh-via-the-bastion">Test SSH via the bastion</a></li>
+      </ul>
+    </li>
+    <li><a href="#clean-up">Clean up</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>In the <a href="https://richardpct.github.io/post/2024/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/">previous tutorial</a>, we isolated our Redis database in a private subnet. But there was a security gap: the webserver still accepted SSH connections directly from the internet (restricted to your IP, but still exposed). If the webserver is compromised via SSH, an attacker has a direct foothold in your VPC.</p>
+<p>In this tutorial, we add a <strong>bastion host</strong> (also called a jump server) to solve this problem. The bastion is the only instance that accepts SSH from the internet. To reach the webserver or the database via SSH, you must first jump through the bastion. This is a standard security pattern in production infrastructure.</p>
+<p>Here is what we build:</p>
+<ul>
+<li>A <strong>VPC with 4 subnets</strong> — 3 public subnets (NAT Gateway, bastion, webserver) and 1 private subnet (database)</li>
+<li>A <strong>bastion host</strong> in its own public subnet — the only entry point for SSH from the internet</li>
+<li>A <strong>webserver</strong> in a public subnet — accepts HTTP from the internet but SSH only from the bastion</li>
+<li>A <strong>Redis database</strong> in a private subnet — accepts Redis connections only from the webserver and SSH only from the bastion</li>
+<li>A <strong>NAT Gateway</strong> in its own public subnet — allows the database to reach the internet for package updates</li>
+</ul>
+<p>Note: for this exercise I do not use the ElastiCache managed service. Instead, I install Redis on a plain EC2 instance to demonstrate the networking concepts.</p>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto05">GitHub repository</a>.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<pre class="mermaid">
+  graph TB
+    Internet((Internet))
+    You[Your IP]
+
+    subgraph VPC[VPC 10.0.0.0/16]
+        IGW[Internet Gateway]
+
+        subgraph SubNAT[&#34;Public Subnet NAT - 10.0.0.0/24&#34;]
+            NAT[NAT Gateway + EIP]
+        end
+
+        subgraph SubBastion[&#34;Public Subnet Bastion - 10.0.1.0/24&#34;]
+            BASTION[&#34;Bastion EC2&lt;br/&gt;Amazon Linux&#34;]
+        end
+
+        subgraph SubWeb[&#34;Public Subnet Web - 10.0.2.0/24&#34;]
+            WEB[&#34;Webserver EC2&lt;br/&gt;Python HTTP :8000&#34;]
+        end
+
+        subgraph SubPrivate[&#34;Private Subnet - 10.0.3.0/24&#34;]
+            DB[&#34;Database EC2&lt;br/&gt;Ubuntu + Redis :6379&#34;]
+        end
+    end
+
+    You -- &#34;SSH :22&#34; --&gt; IGW
+    IGW -- &#34;SSH :22&#34; --&gt; BASTION
+    BASTION -. &#34;SSH :22&#34; .-&gt; WEB
+    BASTION -. &#34;SSH :22&#34; .-&gt; DB
+    Internet -- &#34;HTTP :8000&#34; --&gt; IGW
+    IGW -- &#34;HTTP :8000&#34; --&gt; WEB
+    WEB -- &#34;Redis :6379&#34; --&gt; DB
+    DB -- &#34;HTTP/S outbound&#34; --&gt; NAT
+    NAT --&gt; IGW
+</pre>
+
+<p>Each service lives in its own subnet, which reduces the blast radius of a security issue and makes the firewall rules clearer. In the previous tutorial, the webserver and NAT Gateway shared the same public subnet — now they are separated.</p>
+<h2 id="ssh-access-flow">SSH access flow</h2>
+<p>The key security improvement is that SSH access now goes through the bastion. Nobody can SSH directly into the webserver or the database from the internet:</p>
+<pre class="mermaid">
+  graph LR
+    You[Your IP] -- &#34;SSH :22&#34; --&gt; BASTION[Bastion]
+    BASTION -- &#34;SSH :22&#34; --&gt; WEB[&#34;Webserver&lt;br/&gt;(public subnet)&#34;]
+    BASTION -- &#34;SSH :22&#34; --&gt; DB[&#34;Database&lt;br/&gt;(private subnet)&#34;]
+    Internet((Internet)) -. &#34;SSH blocked by SG&#34; .-&gt; WEB
+</pre>
+
+<p>The webserver is in a public subnet but its security group only allows SSH from the bastion — not from the internet. The database doesn&rsquo;t even need a security group rule to block SSH from the internet: it lives in the private subnet, which has no inbound route from outside the VPC. The only way to reach it via SSH is through the bastion.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e"># Connect to the database via the bastion</span>
+</span></span><span style="display:flex;"><span>ssh -J ec2-user@&lt;bastion_public_ip&gt; ubuntu@&lt;database_private_ip&gt;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Connect to the webserver via the bastion</span>
+</span></span><span style="display:flex;"><span>ssh -J ec2-user@&lt;bastion_public_ip&gt; ec2-user@&lt;webserver_private_ip&gt;
+</span></span></code></pre></div><p>The <code>-J</code> flag tells SSH to first connect to the bastion, then tunnel through it to reach the target. From your perspective, it feels like a direct connection.</p>
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>aws-terraform-tuto05/
+├── modules/
+│   ├── network/              # VPC, 4 subnets, IGW, NAT, security groups
+│   │   ├── main.tf
+│   │   ├── sg.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   ├── bastion/              # Bastion EC2 in public subnet
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   ├── database/             # Redis EC2 in private subnet
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   ├── user-data.sh
+│   │   └── variables.tf
+│   └── webserver/            # Python webserver EC2 in public subnet
+│       ├── main.tf
+│       ├── outputs.tf
+│       ├── providers.tf
+│       ├── user-data.sh
+│       └── variables.tf
+└── envs/
+    └── dev/
+        ├── 01-network/
+        ├── 02-bastion/
+        ├── 03-database/
+        └── 04-webserver/
+</code></pre><p>Compared to tutorial 04, the new addition is the <code>bastion</code> module and the <code>02-bastion</code> stack. The deployment order now has four steps: network, bastion, database, webserver. The bastion stack creates the SSH key pair that is shared with the database and webserver stacks via remote state.</p>
+<h2 id="what-changed-from-tutorial-04">What changed from tutorial 04</h2>
+<h3 id="four-subnets-instead-of-two">Four subnets instead of two</h3>
+<p>The network module now creates four subnets, each dedicated to a specific purpose:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;network&#34;</span> {
+</span></span><span style="display:flex;"><span>  source                <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../../../modules/network&#34;</span>
+</span></span><span style="display:flex;"><span>  aws_profile           <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">aws_profile</span>
+</span></span><span style="display:flex;"><span>  region                <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  env                   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_cidr_block        <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.0.0/16&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_public_nat     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.0.0/24&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_public_bastion <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.1.0/24&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_public_web     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.2.0/24&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_private        <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.3.0/24&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_allowed_ssh      <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">my_ip_address</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>All three public subnets share the same custom route table (default route → Internet Gateway), and the private subnet uses the default route table (default route → NAT Gateway). Isolating each service in its own subnet is a best practice because you can apply different network ACLs per subnet if needed.</p>
+<h3 id="ssh-rules-now-go-through-the-bastion">SSH rules now go through the bastion</h3>
+<p>In tutorial 04, the webserver&rsquo;s SSH rule allowed your IP directly. Now, SSH access to both the webserver and the database is restricted to the bastion&rsquo;s security group:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#75715e"># Only the bastion can SSH into the database
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;db_from_bastion_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">database</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}<span style="color:#75715e">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Only the bastion can SSH into the webserver
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;web_from_bastion_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>And only your IP can SSH into the bastion:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;bastion_from_me_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">cidr_allowed_ssh</span>]
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The bastion also needs egress rules to SSH out to the webserver and database specifically, plus HTTP/HTTPS egress for system updates. Rather than allowing SSH to anywhere (<code>0.0.0.0/0</code>), we restrict the bastion&rsquo;s outbound SSH to only the webserver and database security groups:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;bastion_to_web_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;egress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;bastion_to_db_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;egress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ssh_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">database</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This is tighter than allowing SSH to <code>0.0.0.0/0</code>: even if someone gains access to the bastion, they can only SSH to instances that belong to the webserver or database security groups — not to arbitrary hosts on the internet.</p>
+<h3 id="the-bastion-module">The bastion module</h3>
+<p>The bastion is a minimal EC2 instance — no application is installed on it, just system updates. It exists purely as an SSH gateway:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_instance&#34; &#34;bastion&#34;</span> {
+</span></span><span style="display:flex;"><span>  ami                    <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">aws_ami</span>.<span style="color:#66d9ef">amazonlinux</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  user_data              <span style="color:#f92672">=</span> <span style="color:#960050;background-color:#1e0010">&lt;&lt;-</span><span style="color:#66d9ef">EOF</span><span style="color:#75715e">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e">                           #!/usr/bin/env bash
+</span></span></span><span style="display:flex;"><span>                           <span style="color:#66d9ef">exec</span> <span style="color:#960050;background-color:#1e0010">&gt;</span> <span style="color:#960050;background-color:#1e0010">&gt;</span>(<span style="color:#66d9ef">tee</span> <span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">var</span><span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">log</span><span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">user</span><span style="color:#960050;background-color:#1e0010">-</span><span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">log</span><span style="color:#960050;background-color:#1e0010">|</span><span style="color:#66d9ef">logger</span> <span style="color:#960050;background-color:#1e0010">-</span><span style="color:#66d9ef">t</span> <span style="color:#66d9ef">user</span><span style="color:#960050;background-color:#1e0010">-</span><span style="color:#66d9ef">data</span> <span style="color:#960050;background-color:#1e0010">-</span><span style="color:#66d9ef">s</span> <span style="color:#ae81ff">2</span><span style="color:#960050;background-color:#1e0010">&gt;/</span><span style="color:#66d9ef">dev</span><span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">console</span>) <span style="color:#ae81ff">2</span><span style="color:#960050;background-color:#1e0010">&gt;&amp;</span><span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>                           <span style="color:#66d9ef">sudo</span> <span style="color:#66d9ef">yum</span> <span style="color:#960050;background-color:#1e0010">-</span><span style="color:#66d9ef">y</span> <span style="color:#66d9ef">update</span>
+</span></span><span style="display:flex;"><span>                           <span style="color:#66d9ef">sudo</span> <span style="color:#66d9ef">yum</span> <span style="color:#960050;background-color:#1e0010">-</span><span style="color:#66d9ef">y</span> <span style="color:#66d9ef">upgrade</span>
+</span></span><span style="display:flex;"><span>                           <span style="color:#66d9ef">EOF</span>
+</span></span><span style="display:flex;"><span>  instance_type          <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">instance_type</span>
+</span></span><span style="display:flex;"><span>  key_name               <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_key_pair</span>.<span style="color:#66d9ef">deployer</span>.<span style="color:#66d9ef">key_name</span>
+</span></span><span style="display:flex;"><span>  subnet_id              <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_public_bastion_id</span>
+</span></span><span style="display:flex;"><span>  vpc_security_group_ids <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">sg_bastion_id</span>]
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;bastion-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_eip&#34; &#34;bastion&#34;</span> {
+</span></span><span style="display:flex;"><span>  instance <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_instance</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  domain   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;vpc&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;eip_bastion-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The bastion gets its own Elastic IP so you always connect to the same address. It also creates the SSH key pair, which is exported via outputs and reused by the database and webserver stacks — this way, all instances share the same SSH key.</p>
+<h3 id="shared-ssh-key-via-remote-state">Shared SSH key via remote state</h3>
+<p>The bastion module creates the SSH key pair and exports it:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;ssh_key&#34;</span> {
+</span></span><span style="display:flex;"><span>  value <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_key_pair</span>.<span style="color:#66d9ef">deployer</span>.<span style="color:#66d9ef">key_name</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The database and webserver modules read it from the bastion&rsquo;s remote state:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span>key_name <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">bastion</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">ssh_key</span>
+</span></span></code></pre></div><p>This ensures all instances use the same key, and the key is only created once.</p>
+<h2 id="stack-dependency-chain">Stack dependency chain</h2>
+<p>With four stacks, the remote state dependency chain is now:</p>
+<pre class="mermaid">
+  graph LR
+    NET[01-network] --&gt; BASTION[02-bastion]
+    NET --&gt; DATABASE[03-database]
+    NET --&gt; WEBSERVER[04-webserver]
+    BASTION --&gt; DATABASE
+    BASTION --&gt; WEBSERVER
+    DATABASE --&gt; WEBSERVER
+</pre>
+
+<p>The webserver stack reads from three remote states: network (subnet and security group IDs), bastion (SSH key), and database (Redis private IP). This is the most complex dependency graph we have built so far.</p>
+<h2 id="deploy-the-infrastructure">Deploy the infrastructure</h2>
+<h3 id="prepare-your-variables">Prepare your variables</h3>
+<p>Create a file at <code>~/terraform/aws-terraform-tuto05/terraform_vars_dev_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_aws_profile<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto05/dev/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_bastion<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto05/dev/bastion/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_database<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto05/dev/database/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_webserver<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto05/dev/webserver/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 AAAAXXX...&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_dev_database_pass<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX&#34;</span>
+</span></span><span style="display:flex;"><span>MY_IP<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -s ifconfig.co/<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_ip_address<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$MY_IP<span style="color:#e6db74">/32&#34;</span>
+</span></span></code></pre></div><h3 id="build">Build</h3>
+<p>Deploy the four stacks in order:</p>
+<pre><code>$ cd envs/dev/01-network
+$ make apply
+$ cd ../02-bastion
+$ make apply
+$ cd ../03-database
+$ make apply
+$ cd ../04-webserver
+$ make apply
+</code></pre>
+<h3 id="test-the-webserver">Test the webserver</h3>
+<p>Wait a moment for the user-data scripts to finish, then test the web application:</p>
+<pre><code>$ curl http://&lt;webserver_public_ip&gt;:8000/cgi-bin/hello.py
+</code></pre>
+<p>You should see:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-html" data-lang="html"><span style="display:flex;"><span>&lt;<span style="color:#f92672">html</span>&gt;&lt;<span style="color:#f92672">body</span>&gt;
+</span></span><span style="display:flex;"><span>&lt;<span style="color:#f92672">p</span>&gt;Hello World!&lt;<span style="color:#f92672">br</span> /&gt;counter: 1&lt;<span style="color:#f92672">br</span> /&gt;env: dev&lt;/<span style="color:#f92672">p</span>&gt;
+</span></span><span style="display:flex;"><span>&lt;/<span style="color:#f92672">body</span>&gt;&lt;/<span style="color:#f92672">html</span>&gt;
+</span></span></code></pre></div><p>Run it again — the counter increments, confirming the webserver is communicating with Redis through the private subnet.</p>
+<h3 id="test-ssh-via-the-bastion">Test SSH via the bastion</h3>
+<p>Connect to the database (Ubuntu) through the bastion:</p>
+<pre><code>$ ssh -J ec2-user@&lt;bastion_public_ip&gt; ubuntu@&lt;database_private_ip&gt;
+</code></pre>
+<p>Connect to the webserver (Amazon Linux) through the bastion:</p>
+<pre><code>$ ssh -J ec2-user@&lt;bastion_public_ip&gt; ec2-user@&lt;webserver_private_ip&gt;
+</code></pre>
+<p>Try connecting directly to the webserver or database without the bastion — it will be refused by the security group.</p>
+<h2 id="clean-up">Clean up</h2>
+<p>Destroy in reverse order:</p>
+<pre><code>$ cd envs/dev/04-webserver
+$ make destroy
+$ cd ../03-database
+$ make destroy
+$ cd ../02-bastion
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<h2 id="summary">Summary</h2>
+<p>In this tutorial, we added a bastion host as the single SSH entry point to our infrastructure. The webserver and database no longer accept SSH from the internet — only from the bastion&rsquo;s security group. We also separated each service into its own subnet for better isolation.</p>
+<p>The security model is now layered: your IP can SSH into the bastion, the bastion can SSH into everything else, the webserver can talk to Redis, and the database can only reach the internet outbound through the NAT Gateway. Each of these rules is enforced by security groups that reference other security groups, not CIDR blocks — so the rules follow the instances even if their IPs change.</p>
+<p>In the next tutorial, you will learn how to use the high availability features provided by AWS.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+

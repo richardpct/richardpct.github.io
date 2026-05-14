@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with OpenTofu: Load Balancing with ALB for Zero Downtime | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">AWS with OpenTofu: Load Balancing with ALB for Zero Downtime</span></h1>
+
+<h2 class="date">2024/04/17</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/alb">alb</a> <a href="/tags/load-balancer">load-balancer</a> <a href="/tags/high-availability">high-availability</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#what-changed-from-tutorial-06">What changed from tutorial 06</a>
+      <ul>
+        <li><a href="#webservers-moved-to-private-subnets">Webservers moved to private subnets</a></li>
+        <li><a href="#one-nat-gateway-per-availability-zone">One NAT Gateway per Availability Zone</a></li>
+        <li><a href="#five-subnet-groups">Five subnet groups</a></li>
+      </ul>
+    </li>
+    <li><a href="#the-application-load-balancer">The Application Load Balancer</a>
+      <ul>
+        <li><a href="#the-load-balancer-itself">The load balancer itself</a></li>
+        <li><a href="#the-target-group">The target group</a></li>
+        <li><a href="#the-listener">The listener</a></li>
+        <li><a href="#alb-security-group">ALB security group</a></li>
+      </ul>
+    </li>
+    <li><a href="#the-webserver-asg">The webserver ASG</a></li>
+    <li><a href="#the-health-check-endpoint">The health check endpoint</a></li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#deploy-the-infrastructure">Deploy the infrastructure</a>
+      <ul>
+        <li><a href="#prepare-your-variables">Prepare your variables</a></li>
+        <li><a href="#build">Build</a></li>
+        <li><a href="#test-the-application">Test the application</a></li>
+      </ul>
+    </li>
+    <li><a href="#test-the-high-availability">Test the high availability</a></li>
+    <li><a href="#clean-up">Clean up</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>In the <a href="https://richardpct.github.io/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/">previous tutorial</a>, we made our infrastructure self-healing with Auto Scaling Groups. If the webserver crashed, the ASG replaced it — but there was still a brief downtime while the new instance booted. In production, even a few minutes of downtime is unacceptable.</p>
+<p>In this tutorial, we solve this by adding an <strong>Application Load Balancer</strong> (ALB) in front of <strong>two webservers</strong>. The ALB distributes requests between them, and if one webserver fails, the other keeps serving traffic immediately — zero downtime. The ASG then replaces the failed instance in the background.</p>
+<p>We also make an important architectural change: the <strong>webservers move from the public subnet to the private subnet</strong>. Since users now access the application through the ALB (which lives in the public subnet), the webservers no longer need to be directly exposed to the internet.</p>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto07">GitHub repository</a>.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<pre class="mermaid">
+  graph TB
+    Internet((Internet))
+    You[Your IP]
+
+    subgraph VPC[VPC 10.0.0.0/16]
+        IGW[Internet Gateway]
+
+        subgraph LBSubs[&#34;Public Subnets ALB - 3 AZs&#34;]
+            LBCIDRs[&#34;10.0.11.0/24 | 10.0.12.0/24 | 10.0.13.0/24&#34;]
+            ALB[&#34;Application Load Balancer :80&#34;]
+        end
+
+        subgraph NATSubs[&#34;Public Subnets NAT - 3 AZs&#34;]
+            NATCIDRs[&#34;10.0.21.0/24 | 10.0.22.0/24 | 10.0.23.0/24&#34;]
+            NAT[&#34;3x NAT Gateways&#34;]
+        end
+
+        subgraph BastionSubs[&#34;Public Subnets Bastion - 3 AZs&#34;]
+            BastionCIDRs[&#34;10.0.31.0/24 | 10.0.32.0/24 | 10.0.33.0/24&#34;]
+            BASTION[&#34;ASG min:1 max:1 --&gt; Bastion EC2&#34;]
+        end
+
+        subgraph WebSubs[&#34;Private Subnets Web - 3 AZs&#34;]
+            WebCIDRs[&#34;10.0.41.0/24 | 10.0.42.0/24 | 10.0.43.0/24&#34;]
+            ASGWEB[&#34;ASG min:2 max:2 --&gt; 2x Webserver EC2 :8000&#34;]
+        end
+
+        subgraph RedisSubs[&#34;Private Subnets Redis - 3 AZs&#34;]
+            RedisCIDRs[&#34;10.0.51.0/24 | 10.0.52.0/24 | 10.0.53.0/24&#34;]
+            REDIS[&#34;ElastiCache Redis :6379&#34;]
+        end
+    end
+
+    Internet -- &#34;HTTP :80&#34; --&gt; IGW
+    IGW -- &#34;HTTP :80&#34; --&gt; ALB
+    ALB -- &#34;HTTP :8000&#34; --&gt; ASGWEB
+    You -- &#34;SSH :22&#34; --&gt; IGW
+    IGW -- &#34;SSH :22&#34; --&gt; BASTION
+    BASTION -. &#34;SSH :22&#34; .-&gt; ASGWEB
+    ASGWEB -- &#34;Redis :6379&#34; --&gt; REDIS
+    ASGWEB -- &#34;HTTP/S outbound&#34; --&gt; NAT
+    NAT --&gt; IGW
+
+    style LBCIDRs fill:#ffd,stroke:#cc0,color:#333
+    style NATCIDRs fill:#ffd,stroke:#cc0,color:#333
+    style BastionCIDRs fill:#ffd,stroke:#cc0,color:#333
+    style WebCIDRs fill:#ffd,stroke:#cc0,color:#333
+    style RedisCIDRs fill:#ffd,stroke:#cc0,color:#333
+</pre>
+
+<h2 id="what-changed-from-tutorial-06">What changed from tutorial 06</h2>
+<h3 id="webservers-moved-to-private-subnets">Webservers moved to private subnets</h3>
+<p>In the previous tutorial, the webservers were in public subnets and each had its own Elastic IP. Now that the ALB handles all inbound traffic, the webservers don&rsquo;t need public IPs anymore. They are moved to private subnets where they are unreachable from the internet — only the ALB can forward requests to them.</p>
+<p>This is a significant security improvement. The webservers can still reach the internet for package updates via the NAT Gateway, but no one from outside can connect to them directly.</p>
+<h3 id="one-nat-gateway-per-availability-zone">One NAT Gateway per Availability Zone</h3>
+<p>Instead of a single NAT Gateway, we now create one per AZ:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_nat_gateway&#34; &#34;nat_gw&#34;</span> {
+</span></span><span style="display:flex;"><span>  count         <span style="color:#f92672">=</span> <span style="color:#66d9ef">length</span>(<span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_public_nat</span>)
+</span></span><span style="display:flex;"><span>  allocation_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_eip</span>.<span style="color:#66d9ef">nat</span>[<span style="color:#66d9ef">count</span>.<span style="color:#66d9ef">index</span>].<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  subnet_id     <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">public_nat</span>[<span style="color:#66d9ef">count</span>.<span style="color:#66d9ef">index</span>].<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;nat_gw-${var.env}-${count.index}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Each private subnet&rsquo;s route table points to the NAT Gateway in its own AZ. This way, if AZ-A goes down, the private instances in AZ-B and AZ-C are not affected — they use their own NAT Gateways. Each NAT route table is associated with the private web subnet in the same AZ:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_route_table&#34; &#34;route_nat&#34;</span> {
+</span></span><span style="display:flex;"><span>  count  <span style="color:#f92672">=</span> <span style="color:#66d9ef">length</span>(<span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_public_nat</span>)
+</span></span><span style="display:flex;"><span>  vpc_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">route</span> {
+</span></span><span style="display:flex;"><span>    cidr_block <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;0.0.0.0/0&#34;</span>
+</span></span><span style="display:flex;"><span>    gateway_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_nat_gateway</span>.<span style="color:#66d9ef">nat_gw</span>[<span style="color:#66d9ef">count</span>.<span style="color:#66d9ef">index</span>].<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_route_table_association&#34; &#34;private_web&#34;</span> {
+</span></span><span style="display:flex;"><span>  count          <span style="color:#f92672">=</span> <span style="color:#66d9ef">length</span>(<span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">subnet_private_web</span>)
+</span></span><span style="display:flex;"><span>  subnet_id      <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">private_web</span>[<span style="color:#66d9ef">count</span>.<span style="color:#66d9ef">index</span>].<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  route_table_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_route_table</span>.<span style="color:#66d9ef">route_nat</span>[<span style="color:#66d9ef">count</span>.<span style="color:#66d9ef">index</span>].<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>count.index</code> ensures AZ-0&rsquo;s web subnet routes through NAT-0, AZ-1&rsquo;s web subnet through NAT-1, and so on.</p>
+<h3 id="five-subnet-groups">Five subnet groups</h3>
+<p>The network now has 5 groups of subnets, each spanning 3 AZs — for a total of 15 subnets:</p>
+<table>
+  <thead>
+      <tr>
+          <th>Subnet group</th>
+          <th>Type</th>
+          <th>CIDR blocks</th>
+          <th>Purpose</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>ALB</td>
+          <td>Public</td>
+          <td>10.0.11-13.0/24</td>
+          <td>Load Balancer endpoints</td>
+      </tr>
+      <tr>
+          <td>NAT</td>
+          <td>Public</td>
+          <td>10.0.21-23.0/24</td>
+          <td>NAT Gateways (one per AZ)</td>
+      </tr>
+      <tr>
+          <td>Bastion</td>
+          <td>Public</td>
+          <td>10.0.31-33.0/24</td>
+          <td>SSH jump server</td>
+      </tr>
+      <tr>
+          <td>Web</td>
+          <td>Private</td>
+          <td>10.0.41-43.0/24</td>
+          <td>Webserver instances</td>
+      </tr>
+      <tr>
+          <td>Redis</td>
+          <td>Private</td>
+          <td>10.0.51-53.0/24</td>
+          <td>ElastiCache Redis</td>
+      </tr>
+  </tbody>
+</table>
+<p>Public subnets route through the Internet Gateway. Private subnets route through the NAT Gateway in their respective AZ.</p>
+<h2 id="the-application-load-balancer">The Application Load Balancer</h2>
+<p>The ALB is the central piece of this tutorial. It is defined in <code>modules/network/alb.tf</code> and consists of three resources.</p>
+<h3 id="the-load-balancer-itself">The load balancer itself</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_lb&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  name               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;alb-web-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  internal           <span style="color:#f92672">=</span> <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span>  load_balancer_type <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;application&#34;</span>
+</span></span><span style="display:flex;"><span>  security_groups    <span style="color:#f92672">=</span> [<span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">alb_web</span>.<span style="color:#66d9ef">id</span>]
+</span></span><span style="display:flex;"><span>  subnets            <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_subnet</span>.<span style="color:#66d9ef">public_lb</span>[<span style="color:#960050;background-color:#1e0010">*</span>].<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Setting <code>internal = false</code> makes it internet-facing. It is deployed across all 3 ALB public subnets and protected by its own security group.</p>
+<h3 id="the-target-group">The target group</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_lb_target_group&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  port     <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">web_port</span>
+</span></span><span style="display:flex;"><span>  protocol <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;HTTP&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_id   <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_vpc</span>.<span style="color:#66d9ef">my_vpc</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">health_check</span> {
+</span></span><span style="display:flex;"><span>    healthy_threshold   <span style="color:#f92672">=</span> <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span>    unhealthy_threshold <span style="color:#f92672">=</span> <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span>    timeout             <span style="color:#f92672">=</span> <span style="color:#ae81ff">3</span>
+</span></span><span style="display:flex;"><span>    interval            <span style="color:#f92672">=</span> <span style="color:#ae81ff">30</span>
+</span></span><span style="display:flex;"><span>    path                <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;/cgi-bin/ping.py&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The target group defines where the ALB forwards traffic (port 8000) and how it checks if the webservers are healthy. The ALB calls <code>/cgi-bin/ping.py</code> on each instance every 30 seconds. If an instance fails 2 consecutive checks (<code>unhealthy_threshold = 2</code>), the ALB stops sending it traffic. When the ASG launches a replacement and it passes 2 consecutive checks (<code>healthy_threshold = 2</code>), the ALB starts routing to it again.</p>
+<h3 id="the-listener">The listener</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_lb_listener&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  load_balancer_arn <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_lb</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">arn</span>
+</span></span><span style="display:flex;"><span>  port              <span style="color:#f92672">=</span> <span style="color:#ae81ff">80</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;HTTP&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">default_action</span> {
+</span></span><span style="display:flex;"><span>    target_group_arn <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_lb_target_group</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">arn</span>
+</span></span><span style="display:flex;"><span>    type             <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;forward&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The listener accepts HTTP traffic on port 80 and forwards it to the target group. The flow is:</p>
+<pre class="mermaid">
+  graph LR
+    User[User :80] --&gt; ALB[ALB Listener :80]
+    ALB --&gt; TG[Target Group :8000]
+    TG --&gt; WEB1[Web Server 1 :8000]
+    TG --&gt; WEB2[Web Server 2 :8000]
+    TG -. &#34;Health check every 30s&#34; .-&gt; PING[&#34;/cgi-bin/ping.py&#34;]
+</pre>
+
+<h3 id="alb-security-group">ALB security group</h3>
+<p>The ALB has its own security group that only allows HTTP inbound from anywhere and only forwards to the webserver security group:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;alb_web_from_any_http&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">http_port</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">http_port</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">anywhere</span>
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">alb_web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;alb_web_to_web_http&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;egress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">web_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">web_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">alb_web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The webserver security group mirrors this — it accepts HTTP on port 8000 only from the ALB security group:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;web_from_alb_web_http&#34;</span> {
+</span></span><span style="display:flex;"><span>  type                     <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port                <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">web_port</span>
+</span></span><span style="display:flex;"><span>  to_port                  <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">web_port</span>
+</span></span><span style="display:flex;"><span>  protocol                 <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  source_security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">alb_web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  security_group_id        <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="the-webserver-asg">The webserver ASG</h2>
+<p>The webserver ASG now maintains <strong>2 instances</strong> instead of 1, and is attached to the ALB target group:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_autoscaling_group&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  name                <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;asg_web-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_zone_identifier <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_private_web_id</span>[<span style="color:#960050;background-color:#1e0010">*</span>]
+</span></span><span style="display:flex;"><span>  target_group_arns   <span style="color:#f92672">=</span> [<span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">alb_target_group_web_arn</span>]
+</span></span><span style="display:flex;"><span>  health_check_type   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ELB&#34;</span>
+</span></span><span style="display:flex;"><span>  min_size            <span style="color:#f92672">=</span> <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span>  max_size            <span style="color:#f92672">=</span> <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">launch_template</span> {
+</span></span><span style="display:flex;"><span>    id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_launch_template</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Two important changes compared to tutorial 06:</p>
+<ul>
+<li><strong><code>target_group_arns</code></strong> — links the ASG to the ALB target group, so new instances are automatically registered with the load balancer</li>
+<li><strong><code>health_check_type = &quot;ELB&quot;</code></strong> — the ASG uses the ALB&rsquo;s health checks (the <code>/cgi-bin/ping.py</code> endpoint) instead of basic EC2 status checks. This means if the web application crashes but the instance is still running, the ALB detects it and the ASG replaces the instance</li>
+</ul>
+<p>Since the webservers are now in private subnets, the launch template sets <code>associate_public_ip_address = false</code> — no public IP is needed.</p>
+<h2 id="the-health-check-endpoint">The health check endpoint</h2>
+<p>The user-data script creates a simple <code>/cgi-bin/ping.py</code> page that returns &ldquo;ok&rdquo;:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#75715e">#!/usr/bin/env python3</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>print(<span style="color:#e6db74">&#34;Content-type: text/html&#34;</span>)
+</span></span><span style="display:flex;"><span>print(<span style="color:#e6db74">&#34;&#34;</span>)
+</span></span><span style="display:flex;"><span>print(<span style="color:#e6db74">&#34;&lt;html&gt;&lt;body&gt;&#34;</span>)
+</span></span><span style="display:flex;"><span>print(<span style="color:#e6db74">&#34;&lt;p&gt;ok&lt;/p&gt;&#34;</span>)
+</span></span><span style="display:flex;"><span>print(<span style="color:#e6db74">&#34;&lt;/body&gt;&lt;/html&gt;&#34;</span>)
+</span></span></code></pre></div><p>This is separate from <code>hello.py</code> because the health check should be lightweight — it doesn&rsquo;t need to connect to Redis. The ALB calls this endpoint every 30 seconds on each instance to verify the webserver process is running.</p>
+<p>The <code>hello.py</code> page now also displays the <strong>instance ID</strong>, so you can see which server is responding:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>print(<span style="color:#e6db74">&#34;Id: $INSTANCE_ID&#34;</span>)
+</span></span></code></pre></div><p>When you curl the ALB multiple times, you&rsquo;ll see the instance ID alternating between the two servers — proving the load balancer is distributing requests.</p>
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>aws-terraform-tuto07/
+├── modules/
+│   ├── network/
+│   │   ├── main.tf           # VPC, 15 subnets, IGW, 3 NAT GWs, routes
+│   │   ├── sg.tf             # Security groups for bastion, ALB, web, database
+│   │   ├── alb.tf            # Application Load Balancer, target group, listener
+│   │   ├── iam.tf            # IAM role for EIP association
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   ├── bastion/              # ASG min:1 max:1, EIP re-association
+│   ├── database/             # ElastiCache Redis
+│   └── web/                  # ASG min:2 max:2, attached to ALB target group
+└── envs/
+    └── dev/
+        ├── 01-network/
+        ├── 02-bastion/
+        ├── 03-database/
+        └── 04-web/
+</code></pre><p>The network module now includes <code>alb.tf</code> for the load balancer configuration.</p>
+<h2 id="deploy-the-infrastructure">Deploy the infrastructure</h2>
+<h3 id="prepare-your-variables">Prepare your variables</h3>
+<p>Create a file at <code>~/terraform/aws-terraform-tuto07/terraform_vars_dev_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_aws_profile<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-07/dev/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_bastion<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-07/dev/bastion/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_database<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-07/dev/database/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_web<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-07/dev/web/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 XXXX&#34;</span>
+</span></span><span style="display:flex;"><span>MY_IP<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -s ifconfig.co/<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_ip_address<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$MY_IP<span style="color:#e6db74">/32&#34;</span>
+</span></span></code></pre></div><h3 id="build">Build</h3>
+<p>Deploy the four stacks in order:</p>
+<pre><code>$ cd envs/dev/01-network
+$ make apply
+$ cd ../02-bastion
+$ make apply
+$ cd ../03-database
+$ make apply
+$ cd ../04-web
+$ make apply
+</code></pre>
+<h3 id="test-the-application">Test the application</h3>
+<p>Get the DNS name of the ALB:</p>
+<pre><code>$ aws --profile dev elbv2 describe-load-balancers --names alb-web-dev \
+    --query 'LoadBalancers[*].DNSName' \
+    --output text
+</code></pre>
+<p>Test the application by issuing several requests:</p>
+<pre><code>$ curl http://&lt;load_balancer_dns&gt;/cgi-bin/hello.py
+</code></pre>
+<p>Each request increments the counter (stored in ElastiCache Redis). You should also notice the instance ID alternating between two values — that&rsquo;s the ALB distributing traffic across both webservers.</p>
+<h2 id="test-the-high-availability">Test the high availability</h2>
+<p>This is where the ALB shines. Let&rsquo;s kill one webserver and verify there is <strong>zero downtime</strong>.</p>
+<p>First, connect to one of the webservers through the bastion and kill the Python process:</p>
+<pre><code>$ ssh -J ec2-user@&lt;bastion_eip&gt; ec2-user@&lt;web_private_ip&gt;
+$ sudo pkill python3
+</code></pre>
+<p>Now keep making requests:</p>
+<pre><code>$ curl http://&lt;load_balancer_dns&gt;/cgi-bin/hello.py
+</code></pre>
+<p>The ALB detects the unhealthy instance after 2 failed health checks (about 60 seconds) and stops routing to it. During this time and after, you still get responses — from the remaining healthy server. You&rsquo;ll notice the instance ID no longer alternates; only the healthy server&rsquo;s ID appears.</p>
+<p>After a few minutes, the ASG launches a replacement instance. Once it boots, runs user-data, and passes 2 consecutive health checks, the ALB starts routing to it again. The instance ID will start alternating again, this time with the new instance&rsquo;s ID.</p>
+<p>The key difference from tutorial 06: at no point was the service unavailable. One server was always handling requests while the other was being replaced.</p>
+<h2 id="clean-up">Clean up</h2>
+<p>Destroy in reverse order:</p>
+<pre><code>$ cd envs/dev/04-web
+$ make destroy
+$ cd ../03-database
+$ make destroy
+$ cd ../02-bastion
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<h2 id="summary">Summary</h2>
+<p>In this tutorial, we added an Application Load Balancer to distribute traffic across two webservers, achieving zero-downtime failover. When one webserver fails, the ALB routes all traffic to the remaining healthy server while the ASG replaces the failed one in the background.</p>
+<p>We also moved the webservers from public to private subnets — since users access the application through the ALB, the webservers no longer need to be directly exposed to the internet. And we deployed one NAT Gateway per Availability Zone to ensure private instances maintain internet access even if an AZ fails.</p>
+<p>In the next tutorial, I will show you how to auto-scale your infrastructure when the servers are overloaded — dynamically adding or removing webservers based on CPU utilization.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+

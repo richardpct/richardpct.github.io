@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>AWS with OpenTofu: Multi-Environment Deployments with Modules | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">AWS with OpenTofu: Multi-Environment Deployments with Modules</span></h1>
+
+<h2 class="date">2024/03/06</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/aws">aws</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/modules">modules</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#what-changed-in-the-modules">What changed in the modules</a>
+      <ul>
+        <li><a href="#environment-aware-resource-naming">Environment-aware resource naming</a></li>
+        <li><a href="#aws-profiles-for-multi-account-isolation">AWS profiles for multi-account isolation</a></li>
+        <li><a href="#dynamic-ami-lookup">Dynamic AMI lookup</a></li>
+        <li><a href="#user-data-for-automated-nginx-installation">User-data for automated Nginx installation</a></li>
+        <li><a href="#ssh-restricted-to-your-ip">SSH restricted to your IP</a></li>
+      </ul>
+    </li>
+    <li><a href="#the-callers">The callers</a></li>
+    <li><a href="#deploy-the-infrastructure">Deploy the infrastructure</a>
+      <ul>
+        <li><a href="#prepare-the-dev-variables">Prepare the Dev variables</a></li>
+        <li><a href="#build-the-dev-environment">Build the Dev environment</a></li>
+        <li><a href="#prepare-the-staging-variables">Prepare the Staging variables</a></li>
+        <li><a href="#build-the-staging-environment">Build the Staging environment</a></li>
+      </ul>
+    </li>
+    <li><a href="#clean-up">Clean up</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>In the <a href="https://richardpct.github.io/post/2024/03/04/aws-with-opentofu-refactoring-with-modules/">previous tutorial</a>, we refactored our infrastructure code into reusable modules. In this tutorial, we put those modules to real use by deploying the same infrastructure across <strong>multiple environments</strong> — Dev and Staging — each running in its own AWS account with its own network configuration.</p>
+<p>Along the way, we introduce four practical improvements over the previous tutorials:</p>
+<ul>
+<li><strong>Multi-environment deployment</strong> — the same modules are called from separate <code>envs/dev/</code> and <code>envs/staging/</code> directories with different parameters</li>
+<li><strong>User-data for automated provisioning</strong> — Nginx is installed automatically when the instance boots, no more manual SSH</li>
+<li><strong>SSH restricted to your IP</strong> — the security group only allows SSH from your own public IP address, not from the entire internet</li>
+<li><strong>Dynamic AMI selection</strong> — instead of hardcoding an AMI ID, we use the <code>aws_ami</code> data source to always pick the latest Amazon Linux image</li>
+</ul>
+<p>The full source code is available on my <a href="https://github.com/richardpct/aws-terraform-tuto03">GitHub repository</a>.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<p>Both environments deploy the same architecture — a VPC with a public subnet, an EC2 instance running Nginx behind an Elastic IP — but with separate network ranges and isolated in different AWS accounts:</p>
+<pre class="mermaid">
+  graph TB
+    subgraph DevAccount[AWS Account: Dev]
+        subgraph DevVPC[VPC 10.0.0.0/16]
+            subgraph DevSubnet[Public Subnet 10.0.0.0/24]
+                DevEC2[EC2 - Nginx&lt;br/&gt;&#39;Hello World! Env: dev&#39;]
+            end
+        end
+        DevEIP[Elastic IP]
+        DevEIP &lt;--&gt; DevEC2
+    end
+
+    subgraph StagingAccount[AWS Account: Staging]
+        subgraph StagingVPC[VPC 10.1.0.0/16]
+            subgraph StagingSubnet[Public Subnet 10.1.0.0/24]
+                StagingEC2[EC2 - Nginx&lt;br/&gt;&#39;Hello World! Env: staging&#39;]
+            end
+        end
+        StagingEIP[Elastic IP]
+        StagingEIP &lt;--&gt; StagingEC2
+    end
+
+    Modules[Shared Modules&lt;br/&gt;modules/network&lt;br/&gt;modules/webserver]
+
+    Modules -.-&gt; DevVPC
+    Modules -.-&gt; StagingVPC
+</pre>
+
+<p>Both environments are created from the exact same module code. The only differences are the parameters passed by each caller: the AWS profile, the CIDR blocks, the environment name, and the S3 state key paths.</p>
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>aws-terraform-tuto03/
+├── modules/                          # Shared, reusable modules
+│   ├── network/                      # VPC, subnet, IGW, routes
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── providers.tf
+│   │   └── variables.tf
+│   └── webserver/                    # EC2, security groups, EIP
+│       ├── main.tf
+│       ├── outputs.tf
+│       ├── providers.tf
+│       ├── user-data.sh              # Nginx install script
+│       └── variables.tf
+├── envs/
+│   ├── dev/                          # Dev environment callers
+│   │   ├── 01-network/
+│   │   │   ├── backends.tf
+│   │   │   ├── main.tf
+│   │   │   ├── Makefile
+│   │   │   ├── outputs.tf
+│   │   │   └── variables.tf
+│   │   └── 02-webserver/
+│   │       ├── backends.tf
+│   │       ├── main.tf
+│   │       ├── Makefile
+│   │       ├── outputs.tf
+│   │       └── variables.tf
+│   └── staging/                      # Staging environment callers
+│       ├── 01-network/
+│       │   └── ...                   # Same structure as dev
+│       └── 02-webserver/
+│           └── ...
+</code></pre><p>Compared to tutorial 02, the key structural change is the <code>envs/</code> directory. Each environment gets its own subdirectory containing callers that reference the shared modules. Each environment also has its own Makefile that sources a different secrets file (<code>terraform_vars_dev_secrets</code> vs <code>terraform_vars_staging_secrets</code>).</p>
+<h2 id="what-changed-in-the-modules">What changed in the modules</h2>
+<p>The modules are mostly the same as tutorial 02, but with several improvements.</p>
+<h3 id="environment-aware-resource-naming">Environment-aware resource naming</h3>
+<p>All resources now include the environment name in their tags, so you can easily identify which environment a resource belongs to when looking at the AWS console:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_vpc&#34; &#34;my_vpc&#34;</span> {
+</span></span><span style="display:flex;"><span>  cidr_block <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">vpc_cidr_block</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;my_vpc-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>var.env</code> variable is passed by the caller and can be <code>&quot;dev&quot;</code>, <code>&quot;staging&quot;</code>, or any other value. Every resource — VPC, subnet, security group, EC2 instance, Elastic IP — follows this naming pattern.</p>
+<h3 id="aws-profiles-for-multi-account-isolation">AWS profiles for multi-account isolation</h3>
+<p>The providers now accept an <code>aws_profile</code> variable, allowing each environment to target a different AWS account:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">provider</span> <span style="color:#e6db74">&#34;aws&#34;</span> {
+</span></span><span style="display:flex;"><span>  profile <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">aws_profile</span>
+</span></span><span style="display:flex;"><span>  region  <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>This maps to the named profiles in your <code>~/.aws/credentials</code> file. The Dev environment uses the <code>dev</code> profile, and Staging uses <code>staging</code>.</p>
+<h3 id="dynamic-ami-lookup">Dynamic AMI lookup</h3>
+<p>Instead of hardcoding an AMI ID (which changes across regions and becomes outdated), the webserver module now dynamically selects the latest Amazon Linux 2023 image:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">data</span> <span style="color:#e6db74">&#34;aws_ami&#34; &#34;amazonlinux&#34;</span> {
+</span></span><span style="display:flex;"><span>  most_recent <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">filter</span> {
+</span></span><span style="display:flex;"><span>    name   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;name&#34;</span>
+</span></span><span style="display:flex;"><span>    values <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;al2023-ami-*-kernel-*-x86_64&#34;</span>]
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">filter</span> {
+</span></span><span style="display:flex;"><span>    name   <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;virtualization-type&#34;</span>
+</span></span><span style="display:flex;"><span>    values <span style="color:#f92672">=</span> [<span style="color:#e6db74">&#34;hvm&#34;</span>]
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  owners <span style="color:#f92672">=</span> [<span style="color:#ae81ff">137112412989</span>]<span style="color:#75715e"> # Amazon&#39;s official owner ID
+</span></span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>most_recent = true</code> flag ensures you always get the latest patch version. The owner ID <code>137112412989</code> is Amazon&rsquo;s official account, so you&rsquo;re guaranteed to get a legitimate image.</p>
+<h3 id="user-data-for-automated-nginx-installation">User-data for automated Nginx installation</h3>
+<p>In the previous tutorials, we had to SSH into the instance and manually install Nginx. Now a user-data script handles that automatically at boot time.</p>
+<h4 id="moduleswebserveruser-datash">modules/webserver/user-data.sh</h4>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e">#!/usr/bin/env bash
+</span></span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>INDEX_HTML<span style="color:#f92672">=</span>/usr/share/nginx/html/index.html
+</span></span><span style="display:flex;"><span>exec &gt; &gt;<span style="color:#f92672">(</span>tee /var/log/user-data.log|logger -t user-data -s 2&gt;/dev/console<span style="color:#f92672">)</span> 2&gt;&amp;<span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span>sudo yum -y update
+</span></span><span style="display:flex;"><span>sudo yum -y upgrade
+</span></span><span style="display:flex;"><span>sudo yum -y install nginx
+</span></span><span style="display:flex;"><span>cat <span style="color:#e6db74">&lt;&lt; EOF &gt; $INDEX_HTML
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">Hello World!&lt;br /&gt;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">Environment: ${environment}
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">EOF</span>
+</span></span><span style="display:flex;"><span>sudo systemctl start nginx
+</span></span></code></pre></div><p>The <code>${environment}</code> placeholder is replaced by OpenTofu&rsquo;s <code>templatefile()</code> function before the script is injected into the instance. The <code>exec</code> line redirects all output to both a log file and the system console, which is useful for debugging boot issues.</p>
+<p>The EC2 instance now uses a <strong>launch template</strong> instead of being created directly, because launch templates support user-data natively:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_launch_template&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  name          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;web&#34;</span>
+</span></span><span style="display:flex;"><span>  image_id      <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">aws_ami</span>.<span style="color:#66d9ef">amazonlinux</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  user_data     <span style="color:#f92672">=</span> <span style="color:#66d9ef">base64encode</span>(<span style="color:#66d9ef">templatefile</span>(<span style="color:#e6db74">&#34;${path.module}/user-data.sh&#34;</span>,
+</span></span><span style="display:flex;"><span>                    { environment <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">env</span> }))
+</span></span><span style="display:flex;"><span>  instance_type <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">instance_type</span>
+</span></span><span style="display:flex;"><span>  key_name      <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_key_pair</span>.<span style="color:#66d9ef">deployer</span>.<span style="color:#66d9ef">key_name</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">network_interfaces</span> {
+</span></span><span style="display:flex;"><span>    subnet_id                   <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">network</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">subnet_public_id</span>
+</span></span><span style="display:flex;"><span>    security_groups             <span style="color:#f92672">=</span> [<span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>]
+</span></span><span style="display:flex;"><span>    associate_public_ip_address <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">lifecycle</span> {
+</span></span><span style="display:flex;"><span>    create_before_destroy <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_instance&#34; &#34;web&#34;</span> {
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">launch_template</span> {
+</span></span><span style="display:flex;"><span>    id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_launch_template</span>.<span style="color:#66d9ef">web</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tags <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    Name <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;web_server-${var.env}&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>templatefile()</code> function reads <code>user-data.sh</code>, replaces <code>${environment}</code> with the value of <code>var.env</code> (e.g., <code>&quot;dev&quot;</code> or <code>&quot;staging&quot;</code>), and the result is base64-encoded as required by AWS. The <code>create_before_destroy</code> lifecycle rule ensures a smooth replacement if the launch template changes.</p>
+<h3 id="ssh-restricted-to-your-ip">SSH restricted to your IP</h3>
+<p>The SSH security group rule now uses a variable instead of allowing <code>0.0.0.0/0</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;aws_security_group_rule&#34; &#34;inbound_ssh&#34;</span> {
+</span></span><span style="display:flex;"><span>  type              <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ingress&#34;</span>
+</span></span><span style="display:flex;"><span>  from_port         <span style="color:#f92672">=</span> <span style="color:#ae81ff">22</span>
+</span></span><span style="display:flex;"><span>  to_port           <span style="color:#f92672">=</span> <span style="color:#ae81ff">22</span>
+</span></span><span style="display:flex;"><span>  protocol          <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;tcp&#34;</span>
+</span></span><span style="display:flex;"><span>  cidr_blocks       <span style="color:#f92672">=</span> [<span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">cidr_allowed_ssh</span>]
+</span></span><span style="display:flex;"><span>  security_group_id <span style="color:#f92672">=</span> <span style="color:#66d9ef">aws_security_group</span>.<span style="color:#66d9ef">webserver</span>.<span style="color:#66d9ef">id</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The caller passes your public IP as <code>var.cidr_allowed_ssh</code>, so only you can SSH into the instance. This is a significant security improvement over the previous tutorials:</p>
+<pre class="mermaid">
+  graph LR
+    You[Your IP\nxx.xx.xx.xx/32] -- &#34;SSH :22 Allowed&#34; --&gt; EC2[EC2 Instance]
+    Anyone((Anyone else)) -. &#34;SSH :22 Blocked&#34; .-&gt; EC2
+    World((Internet)) -- &#34;HTTP :80 Allowed&#34; --&gt; EC2
+</pre>
+
+<h2 id="the-callers">The callers</h2>
+<p>The caller files are very concise — they just invoke the shared modules with environment-specific parameters.</p>
+<p><strong>envs/dev/01-network/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;network&#34;</span> {
+</span></span><span style="display:flex;"><span>  source         <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../../../modules/network&#34;</span>
+</span></span><span style="display:flex;"><span>  aws_profile    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">aws_profile</span>
+</span></span><span style="display:flex;"><span>  region         <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  env            <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_cidr_block <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.0.0/16&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_public  <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.0.0.0/24&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p><strong>envs/staging/01-network/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;network&#34;</span> {
+</span></span><span style="display:flex;"><span>  source         <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../../../modules/network&#34;</span>
+</span></span><span style="display:flex;"><span>  aws_profile    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">aws_profile</span>
+</span></span><span style="display:flex;"><span>  region         <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  env            <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;staging&#34;</span>
+</span></span><span style="display:flex;"><span>  vpc_cidr_block <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.1.0.0/16&#34;</span>
+</span></span><span style="display:flex;"><span>  subnet_public  <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;10.1.0.0/24&#34;</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Notice the differences: the <code>env</code> label changes, and the CIDR blocks use <code>10.0.x.x</code> for dev and <code>10.1.x.x</code> for staging. Everything else — the VPC, subnet, Internet Gateway, route table — is created identically by the same module code.</p>
+<p><strong>envs/dev/02-webserver/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;webserver&#34;</span> {
+</span></span><span style="display:flex;"><span>  source                      <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../../../modules/webserver&#34;</span>
+</span></span><span style="display:flex;"><span>  aws_profile                 <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">aws_profile</span>
+</span></span><span style="display:flex;"><span>  region                      <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  env                         <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">bucket</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_key    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">key_network</span>
+</span></span><span style="display:flex;"><span>  instance_type               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;t2.micro&#34;</span>
+</span></span><span style="display:flex;"><span>  ssh_public_key              <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">ssh_public_key</span>
+</span></span><span style="display:flex;"><span>  cidr_allowed_ssh            <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">my_ip_address</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p><strong>envs/staging/02-webserver/main.tf</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">module</span> <span style="color:#e6db74">&#34;webserver&#34;</span> {
+</span></span><span style="display:flex;"><span>  source                      <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;../../../modules/webserver&#34;</span>
+</span></span><span style="display:flex;"><span>  region                      <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">region</span>
+</span></span><span style="display:flex;"><span>  env                         <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;staging&#34;</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_bucket <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">bucket</span>
+</span></span><span style="display:flex;"><span>  network_remote_state_key    <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">key_network</span>
+</span></span><span style="display:flex;"><span>  instance_type               <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;t2.micro&#34;</span>
+</span></span><span style="display:flex;"><span>  ssh_public_key              <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">ssh_public_key</span>
+</span></span><span style="display:flex;"><span>  cidr_allowed_ssh            <span style="color:#f92672">=</span> <span style="color:#66d9ef">var</span>.<span style="color:#66d9ef">my_ip_address</span>
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="deploy-the-infrastructure">Deploy the infrastructure</h2>
+<p>Both environments can be built independently, even simultaneously.</p>
+<h3 id="prepare-the-dev-variables">Prepare the Dev variables</h3>
+<p>Create a file at <code>~/terraform/aws-terraform-tuto03/terraform_vars_dev_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_aws_profile<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;dev&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-03/dev/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_webserver<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-03/dev/webserver/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 AAAAXXXX&#34;</span>
+</span></span><span style="display:flex;"><span>MY_IP<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -s ifconfig.co/<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_ip_address<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$MY_IP<span style="color:#e6db74">/32&#34;</span>
+</span></span></code></pre></div><p>The last two lines dynamically fetch your current public IP and format it as a CIDR block (<code>/32</code> means a single address).</p>
+<h3 id="build-the-dev-environment">Build the Dev environment</h3>
+<pre><code>$ cd envs/dev/01-network
+$ make apply
+$ cd ../02-webserver
+$ make apply
+</code></pre>
+<p>The output will display the Elastic IP:</p>
+<pre tabindex="0"><code>Apply complete! Resources: 8 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+public_ip = &#34;xx.xx.xx.xx&#34;
+</code></pre><p>Test it — no manual Nginx installation needed this time:</p>
+<pre><code>$ curl http://xx.xx.xx.xx
+</code></pre>
+<p>Should return:</p>
+<pre tabindex="0"><code>Hello World!&lt;br /&gt;
+Environment: dev
+</code></pre><h3 id="prepare-the-staging-variables">Prepare the Staging variables</h3>
+<p>Create a file at <code>~/terraform/aws-terraform-tuto03/terraform_vars_staging_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_aws_profile<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;staging&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-tofu-state&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_network<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-03/staging/network/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_webserver<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tuto-03/staging/webserver/terraform.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ssh_public_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 AAAAXXXX&#34;</span>
+</span></span><span style="display:flex;"><span>MY_IP<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>curl -s ifconfig.co/<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_ip_address<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$MY_IP<span style="color:#e6db74">/32&#34;</span>
+</span></span></code></pre></div><p>Note the different <code>aws_profile</code> and state key paths with <code>staging/</code> prefix.</p>
+<h3 id="build-the-staging-environment">Build the Staging environment</h3>
+<pre><code>$ cd envs/staging/01-network
+$ make apply
+$ cd ../02-webserver
+$ make apply
+</code></pre>
+<p>Test it:</p>
+<pre><code>$ curl http://xx.xx.xx.xx
+</code></pre>
+<p>Should return:</p>
+<pre tabindex="0"><code>Hello World!&lt;br /&gt;
+Environment: staging
+</code></pre><p>The page content confirms that the <code>${environment}</code> variable in the user-data script was correctly templated with the environment name.</p>
+<h2 id="clean-up">Clean up</h2>
+<p>Destroy each environment in reverse order.</p>
+<p>Dev environment:</p>
+<pre><code>$ cd envs/dev/02-webserver
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<p>Staging environment:</p>
+<pre><code>$ cd envs/staging/02-webserver
+$ make destroy
+$ cd ../01-network
+$ make destroy
+</code></pre>
+<h2 id="summary">Summary</h2>
+<p>In this tutorial, we leveraged the modules from tutorial 02 to deploy identical infrastructure across two separate environments, each with its own AWS account and network configuration. We also introduced three practical improvements: automated Nginx installation via user-data, SSH access restricted to your IP address, and dynamic AMI selection.</p>
+<p>The key takeaway is the power of the module pattern: the resource definitions are written once, and each environment simply calls them with different parameters. Adding a new environment (e.g., production) would only require creating a new <code>envs/prod/</code> directory with its own callers and secrets file — zero changes to the module code.</p>
+<p>In the next tutorial, I will introduce you to private subnets.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+
