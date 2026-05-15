@@ -9,10 +9,10 @@
     <lastBuildDate>Sun, 15 Mar 2026 12:19:28 +0100</lastBuildDate>
     <atom:link href="/post/index.xml" rel="self" type="application/rss+xml" />
     <item>
-      <title>Automating Kubernetes on Proxmox with Tofu</title>
-      <link>/post/2026/03/15/automating-kubernetes-on-proxmox-with-tofu/</link>
+      <title>Automating Kubernetes on Proxmox with OpenTofu</title>
+      <link>/post/2026/03/15/automating-kubernetes-on-proxmox-with-opentofu/</link>
       <pubDate>Sun, 15 Mar 2026 12:19:28 +0100</pubDate>
-      <guid>/post/2026/03/15/automating-kubernetes-on-proxmox-with-tofu/</guid>
+      <guid>/post/2026/03/15/automating-kubernetes-on-proxmox-with-opentofu/</guid>
       <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;After deploying your Proxmox cluster in &lt;a href=&#34;https://richardpct.github.io/post/2026/01/05/automating-proxmox-ceph-with-ansible/&#34;&gt;my previous article&lt;/a&gt;, this project is intended to show you how to deploy a Kubernetes cluster in high availability on your Proxmox cluster using Terraform/OpenTofu with the Telmate provider. The full source code is available on &lt;a href=&#34;https://github.com/richardpct/k8s-on-proxmox&#34;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;p&gt;This project fully automates the deployment of a &lt;strong&gt;production-grade, highly available Kubernetes cluster&lt;/strong&gt; on a Proxmox VE hypervisor cluster using OpenTofu (Terraform-compatible). Starting from bare Proxmox nodes, a single sequence of &lt;code&gt;make apply&lt;/code&gt; commands provisions all the infrastructure, bootstraps Kubernetes, and deploys a complete application platform — with no manual SSH or &lt;code&gt;kubectl&lt;/code&gt; steps required.&lt;/p&gt;</description>
     </item>
     <item>

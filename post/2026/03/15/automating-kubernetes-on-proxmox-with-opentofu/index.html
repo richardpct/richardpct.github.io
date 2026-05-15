@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>Automating Kubernetes on Proxmox with OpenTofu | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">Automating Kubernetes on Proxmox with OpenTofu</span></h1>
+
+<h2 class="date">2026/03/15</h2>
+<p class="terms">
+  
+  
+  
+  
+  
+</p>
+</div>
+
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>After deploying your Proxmox cluster in <a href="https://richardpct.github.io/post/2026/01/05/automating-proxmox-ceph-with-ansible/">my previous article</a>, this project is intended to show you how to deploy a Kubernetes cluster in high availability on your Proxmox cluster using Terraform/OpenTofu with the Telmate provider. The full source code is available on <a href="https://github.com/richardpct/k8s-on-proxmox">GitHub</a>.</p>
+<p>This project fully automates the deployment of a <strong>production-grade, highly available Kubernetes cluster</strong> on a Proxmox VE hypervisor cluster using OpenTofu (Terraform-compatible). Starting from bare Proxmox nodes, a single sequence of <code>make apply</code> commands provisions all the infrastructure, bootstraps Kubernetes, and deploys a complete application platform — with no manual SSH or <code>kubectl</code> steps required.</p>
+<p>The resulting cluster includes:</p>
+<ul>
+<li><strong>3 control plane nodes</strong> and <strong>3 worker nodes</strong> running Ubuntu 24.04, bootstrapped with <code>kubeadm</code></li>
+<li><strong>1 HAProxy load balancer</strong> distributing traffic to the API server and to worker nodes</li>
+<li><strong>Cilium</strong> as the CNI (with kube-proxy replacement, WireGuard encryption, and Hubble observability)</li>
+<li><strong>Cilium Gateway API</strong> for HTTPS ingress, backed by a Let&rsquo;s Encrypt wildcard certificate</li>
+<li><strong>Ceph-CSI</strong> for persistent storage via your Proxmox Ceph cluster</li>
+<li><strong>ArgoCD</strong> for GitOps-based application delivery</li>
+<li><strong>Vault</strong>, <strong>GitLab</strong>, <strong>Prometheus</strong>, and <strong>Grafana</strong> deployed as applications</li>
+</ul>
+<p>DNS is managed through AWS Route 53, and all Terraform state is stored remotely in an S3 bucket.</p>
+<h2 id="architecture-overview">Architecture Overview</h2>
+<pre class="mermaid">
+  graph LR
+    Users((Users)) --&gt; DNS[AWS Route 53&lt;br/&gt;*.yourdomain.com]
+    DNS --&gt; LB[HAProxy&lt;br/&gt;192.168.1.131]
+
+    LB -- &#34;:6443&#34; --&gt; CP1
+    LB -- &#34;:6443&#34; --&gt; CP2
+    LB -- &#34;:6443&#34; --&gt; CP3
+    LB -- &#34;:443&#34; --&gt; W1
+    LB -- &#34;:443&#34; --&gt; W2
+    LB -- &#34;:443&#34; --&gt; W3
+
+    subgraph proxmox[Proxmox + Ceph Cluster]
+        subgraph pve1[pve-01]
+            CP1[control-plane-01&lt;br/&gt;192.168.1.111]
+            W1[worker-01&lt;br/&gt;192.168.1.121]
+        end
+        subgraph pve2[pve-02]
+            CP2[control-plane-02&lt;br/&gt;192.168.1.112]
+            W2[worker-02&lt;br/&gt;192.168.1.122]
+        end
+        subgraph pve3[pve-03]
+            CP3[control-plane-03&lt;br/&gt;192.168.1.113]
+            W3[worker-03&lt;br/&gt;192.168.1.123]
+        end
+    end
+</pre>
+
+<p>Each Proxmox node hosts one control plane and one worker, ensuring workloads are distributed across physical hosts.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<ol>
+<li><strong>A Proxmox VE cluster</strong> (3 nodes recommended) with Ceph configured for storage.</li>
+<li><strong>An AWS account</strong> with Route 53 managing your domain. Your <code>~/.aws/config</code> and <code>~/.aws/credentials</code> must be configured.</li>
+<li><strong>A registered domain name</strong> in AWS Route 53.</li>
+<li><strong>OpenTofu</strong> installed on your local machine. Terraform may work with minor adjustments, but the Makefiles call <code>tofu</code>.</li>
+<li><strong>kubectl</strong> installed locally.</li>
+<li><strong>SSH access</strong> to your Proxmox nodes as root (used to upload cloud-init configs and Ubuntu cloud images).</li>
+</ol>
+<h2 id="project-structure">Project Structure</h2>
+<p>The project follows a modular Terraform pattern: reusable modules live in <code>modules/</code>, and a concrete cluster instance lives in <code>cluster-01/</code>. This design lets you create additional clusters (e.g., <code>cluster-02/</code>) by simply referencing the same modules with different variables.</p>
+<pre tabindex="0"><code>.
+├── modules/                        # Reusable Terraform modules
+│   ├── bucket/                     # S3 bucket for Terraform state
+│   ├── certificate/                # Let&#39;s Encrypt wildcard TLS certificate
+│   ├── dns/                        # Route 53 DNS records
+│   ├── infra/                      # Proxmox VMs + cloud-init + kubeadm bootstrap
+│   │   └── cloud-init/             # Cloud-init templates for each VM role
+│   │       ├── kubeadm-master.yaml.tftpl
+│   │       ├── kubeadm-worker.yaml.tftpl
+│   │       └── loadbalancer.yaml.tftpl
+│   └── kubernetes/                 # Helm releases, secrets, Gateway API config
+│       ├── helm-values/            # Values files for Cilium, ArgoCD, Vault
+│       └── manifests/              # Gateway and HTTPRoute YAML templates
+└── cluster-01/                     # Concrete cluster instance
+    ├── 01-bucket/                  # Step 1: Create S3 backend
+    ├── 02-certificate/             # Step 2: Request TLS certificate
+    ├── 03-dns/                     # Step 3: Create DNS entries
+    ├── 04-infra/                   # Step 4: Provision VMs and bootstrap K8s
+    └── 05-kubernetes/              # Step 5: Deploy platform components
+</code></pre><p>Each step has its own <code>Makefile</code>, <code>main.tf</code>, <code>variables.tf</code>, and <code>backends.tf</code>. The Makefiles source secrets from <code>~/terraform/k8s-on-proxmox/tofu_vars_secrets</code> and wrap <code>tofu init</code>/<code>apply</code>/<code>destroy</code> commands.</p>
+<h2 id="how-the-code-works">How the Code Works</h2>
+<h3 id="step-1--s3-bucket-modulesbucket">Step 1 — S3 Bucket (<code>modules/bucket/</code>)</h3>
+<p>Creates an AWS S3 bucket with versioning enabled to store Terraform remote state. Versioning protects against accidental state corruption. The <code>force_destroy = true</code> flag allows the bucket to be destroyed even when it contains objects, which is useful for cleanup.</p>
+<h3 id="step-2--tls-certificate-modulescertificate">Step 2 — TLS Certificate (<code>modules/certificate/</code>)</h3>
+<p>Uses the ACME provider to request a <strong>wildcard certificate</strong> (<code>*.yourdomain.com</code>) from Let&rsquo;s Encrypt. The DNS-01 challenge is solved automatically via Route 53 — Terraform creates a temporary TXT record to prove domain ownership, and Let&rsquo;s Encrypt issues the certificate. The resulting private key and full certificate chain (including the issuer) are stored in the Terraform state and later injected into Kubernetes as a TLS secret.</p>
+<h3 id="step-3--dns-records-modulesdns">Step 3 — DNS Records (<code>modules/dns/</code>)</h3>
+<p>Creates A records in Route 53 for each application (ArgoCD, GitLab, Grafana, Prometheus, Vault), all pointing to the load balancer&rsquo;s IP address (<code>192.168.1.131</code>). This means <code>argocd.yourdomain.com</code>, <code>gitlab.yourdomain.com</code>, etc., all resolve to the HAProxy VM, which then routes traffic into the cluster.</p>
+<h3 id="step-4--infrastructure-modulesinfra">Step 4 — Infrastructure (<code>modules/infra/</code>)</h3>
+<p>This is the most complex module. It performs several operations in sequence:</p>
+<p><strong>a) Ubuntu Cloud Image Provisioning</strong></p>
+<p>The <code>update_images</code> resource SSHs into each Proxmox node, downloads the Ubuntu 24.04 cloud image (if not already present or outdated via SHA256 check), and creates a Proxmox VM template from it. This template is then cloned to create the actual VMs.</p>
+<p><strong>b) Cloud-Init Generation and Upload</strong></p>
+<p>Three cloud-init templates are rendered with Terraform&rsquo;s <code>templatefile()</code> function and uploaded to each Proxmox node&rsquo;s <code>/var/lib/vz/snippets/</code> directory:</p>
+<ul>
+<li><strong><code>kubeadm-master.yaml.tftpl</code></strong> — Installs containerd, kubeadm, kubelet, and kubectl. On the primary control plane (<code>*-01</code>), it runs <code>kubeadm init</code> with <code>--skip-phases=addon/kube-proxy</code> (since Cilium replaces kube-proxy) and <code>--upload-certs</code> for HA. The <code>controlPlaneEndpoint</code> is set to the load balancer IP so all API traffic is routed through HAProxy. It also configures the controller-manager, scheduler, and etcd to expose metrics on <code>0.0.0.0</code> for Prometheus scraping.</li>
+<li><strong><code>kubeadm-worker.yaml.tftpl</code></strong> — Same containerd and Kubernetes tooling installation, but does not run <code>kubeadm init</code> or <code>join</code>; the join happens later via SSH.</li>
+<li><strong><code>loadbalancer.yaml.tftpl</code></strong> — Installs HAProxy and configures two frontends: one forwarding port <code>6443</code> (Kubernetes API) to the three control planes in round-robin, and one forwarding port <code>443</code> (HTTPS) to the workers on NodePort <code>30443</code> (where the Cilium Gateway listens). It also exposes HAProxy metrics on port <code>8405</code> for Prometheus.</li>
+</ul>
+<p><strong>c) VM Creation</strong></p>
+<p>Uses the Telmate Proxmox provider (<code>proxmox_vm_qemu</code>) to clone the Ubuntu cloud image template into 7 VMs: 1 load balancer (2 cores, 2 GB RAM, 10 GB disk), 3 control planes (2 cores, 4 GB RAM, 10 GB disk), and 3 workers (4 cores, 6 GB RAM, 30 GB disk). Each VM gets a static IP via cloud-init, and the storage backend switches between <code>local-lvm</code> (non-prod) and <code>mypool</code> (Ceph, prod) based on the <code>is_prod</code> flag.</p>
+<p><strong>d) Cluster Bootstrap</strong></p>
+<p>After all VMs boot and cloud-init finishes (detected by polling for &ldquo;DONE&rdquo; in <code>/var/log/cloud-init-output.log</code>):</p>
+<ol>
+<li>The <strong>primary control plane</strong> (<code>k8s-control-plane-01</code>) runs <code>kubeadm init</code> during cloud-init. Terraform then extracts the <code>kubeadm join</code> commands from its logs and saves them as local scripts.</li>
+<li>The <code>kubeconfig</code> is copied from the primary master to <code>~/.kube/config</code> on the operator&rsquo;s machine.</li>
+<li><strong>Secondary control planes</strong> join via the extracted <code>kubeadm join --control-plane</code> command.</li>
+<li><strong>Workers</strong> join via the extracted <code>kubeadm join</code> command (without <code>--control-plane</code>).</li>
+</ol>
+<h3 id="step-5--kubernetes-platform-moduleskubernetes">Step 5 — Kubernetes Platform (<code>modules/kubernetes/</code>)</h3>
+<p>Once the cluster is up and <code>kubectl</code> works, this module deploys the full platform stack:</p>
+<p><strong>a) TLS Secret</strong></p>
+<p>The wildcard certificate from Step 2 is stored as a <code>kubernetes.io/tls</code> secret in <code>kube-system</code>, referenced by the Cilium Gateway for HTTPS termination.</p>
+<p><strong>b) Gateway API CRDs</strong></p>
+<p>The Kubernetes Gateway API custom resource definitions (v1.2.0) are applied before Cilium is installed, since Cilium needs them to enable its Gateway API support.</p>
+<p><strong>c) Cilium CNI</strong></p>
+<p>Deployed via Helm with kube-proxy replacement enabled, Gateway API support, Hubble observability (with DNS, TCP, flow, and HTTP metrics), WireGuard-based pod-to-pod encryption, and Prometheus metrics export. The <code>k8sServiceHost</code> is set to the load balancer IP so Cilium can reach the API server.</p>
+<p><strong>d) Cilium Gateway</strong></p>
+<p>A <code>Gateway</code> resource is created in <code>kube-system</code> that listens on NodePort <code>30443</code> for HTTPS traffic, using the wildcard TLS certificate. All <code>HTTPRoute</code> resources across all namespaces can attach to this single gateway.</p>
+<p><strong>e) Vault</strong></p>
+<p>HashiCorp Vault is deployed in dev mode via Helm into the <code>vault</code> namespace. An <code>HTTPRoute</code> exposes it at <code>vault.yourdomain.com</code>. Terraform waits for Vault to be healthy before proceeding.</p>
+<p><strong>f) Ceph-CSI Setup</strong></p>
+<p>A namespace <code>ceph-csi</code> is created, and the Ceph admin secret is stored as a Kubernetes secret. A custom RBAC ClusterRole is created to grant the CephFS provisioner access to <code>volumeattachments</code> — this works around a permissions issue in the default Ceph-CSI chart.</p>
+<p><strong>g) Monitoring Setup</strong></p>
+<p>A <code>monitoring</code> namespace is created with a secret for the Grafana admin password.</p>
+<p><strong>h) ArgoCD</strong></p>
+<p>Deployed via Helm with 3 replicas for both the server and repo-server. The ArgoCD server is exposed via a Gateway API <code>HTTPRoute</code> at <code>argocd.yourdomain.com</code>. It is configured in insecure mode (TLS is terminated at the Cilium Gateway, not at ArgoCD).</p>
+<p><strong>i) ArgoCD Applications</strong></p>
+<p>A second Helm release (<code>argocd-apps</code>) registers the following applications for GitOps delivery from <a href="https://github.com/richardpct/argocd-apps">github.com/richardpct/argocd-apps</a>:</p>
+<ul>
+<li><strong>Ceph-CSI</strong> — CephFS CSI driver, configured with your Ceph cluster ID</li>
+<li><strong>Metrics Server</strong> — cluster metrics for <code>kubectl top</code> and HPA</li>
+<li><strong>GitLab</strong> — self-hosted GitLab instance (exposed via HTTPRoute at <code>gitlab.yourdomain.com</code>)</li>
+<li><strong>kube-prometheus-stack</strong> — Prometheus + Grafana monitoring stack</li>
+</ul>
+<p>ArgoCD watches the Git repository and automatically syncs these applications to the cluster.</p>
+<h2 id="prepare-your-variables">Prepare Your Variables</h2>
+<p>Create a file at <code>~/terraform/k8s-on-proxmox/tofu_vars_secrets</code> containing your environment-specific values:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_BUCKET&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_certificate<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tofu/kubernetes/certificate/tofu.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_dns<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tofu/kubernetes/dns/tofu.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_infra<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tofu/kubernetes/infra/tofu.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_kubernetes<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tofu/kubernetes/kubernetes/tofu.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_domain<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_DOMAIN&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_email<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_MAIL&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_pm_user<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;terraform-prov@pve&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_pm_password<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_PVE_PASSWORD&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_nameserver<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_NAMESERVER&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_gateway<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_GATEWAY&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_public_ssh_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 ...&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_cephfs_secret<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>ssh root@YOUR_PVE_IP ceph auth ls -f json | jq -r <span style="color:#e6db74">&#39;.auth_dump[] | select(.entity==&#34;client.admin&#34;) | .key&#39;</span><span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_ceph_cluster_id<span style="color:#f92672">=</span><span style="color:#66d9ef">$(</span>ssh root@YOUR_PVE_IP ceph -s -f json | jq -r .fsid<span style="color:#66d9ef">)</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_vault_token<span style="color:#f92672">=</span>YOUR_VAULT_TOKEN
+</span></span><span style="display:flex;"><span>export TF_VAR_gitlab_password<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_GITLAB_PASSWORD&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_grafana_password<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_GRAFANA_PASSWORD&#34;</span>
+</span></span></code></pre></div><table>
+  <thead>
+      <tr>
+          <th>Variable</th>
+          <th>Description</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>YOUR_BUCKET</code></td>
+          <td>A globally unique S3 bucket name for Terraform state</td>
+      </tr>
+      <tr>
+          <td><code>YOUR_DOMAIN</code></td>
+          <td>Your Route 53 registered domain (e.g., <code>example.com</code>)</td>
+      </tr>
+      <tr>
+          <td><code>YOUR_MAIL</code></td>
+          <td>Email for Let&rsquo;s Encrypt registration</td>
+      </tr>
+      <tr>
+          <td><code>YOUR_PVE_PASSWORD</code></td>
+          <td>Password for the <code>terraform-prov@pve</code> Proxmox user</td>
+      </tr>
+      <tr>
+          <td><code>YOUR_NAMESERVER</code></td>
+          <td>Your local DNS resolver, typically your home router IP</td>
+      </tr>
+      <tr>
+          <td><code>YOUR_GATEWAY</code></td>
+          <td>Your LAN gateway for internet access, typically your home router IP</td>
+      </tr>
+      <tr>
+          <td><code>YOUR_PVE_IP</code></td>
+          <td>IP of any Proxmox node (used to retrieve Ceph credentials via SSH)</td>
+      </tr>
+      <tr>
+          <td><code>YOUR_VAULT_TOKEN</code></td>
+          <td>Root token for Vault</td>
+      </tr>
+      <tr>
+          <td><code>YOUR_GITLAB_PASSWORD</code></td>
+          <td>Root password for the GitLab instance</td>
+      </tr>
+      <tr>
+          <td><code>YOUR_GRAFANA_PASSWORD</code></td>
+          <td>Admin password for Grafana</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="deploy-the-infrastructure">Deploy the Infrastructure</h2>
+<p>Each step is deployed sequentially from the <code>cluster-01/</code> directory. The Makefiles handle <code>tofu init</code> and secret sourcing automatically.</p>
+<p><strong>Step 1 — Create the S3 bucket for Terraform state:</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>cd cluster-01/01-bucket
+</span></span><span style="display:flex;"><span>make apply
+</span></span></code></pre></div><p><strong>Step 2 — Request a wildcard TLS certificate via Let&rsquo;s Encrypt DNS challenge:</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>cd ../02-certificate
+</span></span><span style="display:flex;"><span>make apply
+</span></span></code></pre></div><p><strong>Step 3 — Create DNS records pointing your applications to the load balancer:</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>cd ../03-dns
+</span></span><span style="display:flex;"><span>make apply
+</span></span></code></pre></div><p>This creates A records for <code>argocd</code>, <code>gitlab</code>, <code>grafana</code>, <code>prometheus</code>, and <code>vault</code> — all pointing to <code>192.168.1.131</code>. You can customize the list in <code>cluster-01/03-dns/main.tf</code>.</p>
+<p><strong>Step 4 — Provision VMs and bootstrap the Kubernetes cluster:</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>cd ../04-infra
+</span></span><span style="display:flex;"><span>make apply
+</span></span></code></pre></div><p>This is the longest step. It downloads the Ubuntu cloud image to each Proxmox node, creates 7 VMs, waits for cloud-init to finish, initializes the Kubernetes cluster with <code>kubeadm</code>, joins the secondary masters and workers, and copies the kubeconfig to your machine.</p>
+<p><strong>Step 5 — Deploy the platform stack on Kubernetes:</strong></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>cd ../05-kubernetes
+</span></span><span style="display:flex;"><span>make apply
+</span></span></code></pre></div><p>This installs Cilium, the Gateway API, Vault, ArgoCD, and registers all ArgoCD applications. ArgoCD then takes over and deploys Ceph-CSI, metrics-server, GitLab, and the Prometheus/Grafana monitoring stack from the <a href="https://github.com/richardpct/argocd-apps">argocd-apps repository</a>.</p>
+<h2 id="clean-up">Clean Up</h2>
+<p>Destroy everything in reverse order:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>cd cluster-01/05-kubernetes
+</span></span><span style="display:flex;"><span>make destroy
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>cd ../03-dns
+</span></span><span style="display:flex;"><span>make destroy
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>cd ../02-certificate
+</span></span><span style="display:flex;"><span>make destroy
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>cd ../01-bucket
+</span></span><span style="display:flex;"><span>make destroy
+</span></span></code></pre></div><p>Note: Step 5&rsquo;s <code>make destroy</code> removes all Terraform-managed Kubernetes resources and then also destroys the VMs from Step 4 automatically.</p>
+<h2 id="customization">Customization</h2>
+<p>To adapt this project to your environment, the main files to edit are:</p>
+<ul>
+<li><strong><code>cluster-01/04-infra/main.tf</code></strong> — Change IP addresses, VMID numbers, Proxmox node names, and the Proxmox API URL to match your network and cluster.</li>
+<li><strong><code>cluster-01/03-dns/main.tf</code></strong> — Change the load balancer IP and the list of applications that get DNS entries.</li>
+<li><strong><code>modules/infra/variables.tf</code></strong> — Adjust VM sizing (CPU cores, memory, disk) in the <code>locals</code> block.</li>
+<li><strong><code>modules/kubernetes/helm-values/</code></strong> — Tune Helm chart values for Cilium, ArgoCD, or Vault.</li>
+</ul>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+
