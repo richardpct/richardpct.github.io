@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
 	<channel>
-		<title>Cilium on home</title>
-		<link>/tags/cilium/</link>
-		<description>Recent content in Cilium on home</description>
+		<title>Rke2 on home</title>
+		<link>/tags/rke2/</link>
+		<description>Recent content in Rke2 on home</description>
 		<generator>Hugo</generator>
 		<language>en-us</language>
 		
@@ -12,20 +12,13 @@
 		
 			<lastBuildDate>Tue, 31 Mar 2026 00:00:00 +0000</lastBuildDate>
 		
-			<atom:link href="/tags/cilium/index.xml" rel="self" type="application/rss+xml" />
+			<atom:link href="/tags/rke2/index.xml" rel="self" type="application/rss+xml" />
 			<item>
 				<title>Rancher on Proxmox: Managing Multiple Kubernetes Clusters with OpenTofu</title>
 				<link>/post/2026/03/31/rancher-on-proxmox-managing-multiple-kubernetes-clusters-with-opentofu/</link>
 				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
 				<guid>/post/2026/03/31/rancher-on-proxmox-managing-multiple-kubernetes-clusters-with-opentofu/</guid>
 				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;Running a single Kubernetes cluster is one thing. Running several — a production cluster, a staging cluster, each with its own lifecycle — is another problem entirely. That&amp;rsquo;s where &lt;strong&gt;Rancher&lt;/strong&gt; comes in: a management platform that provisions and operates multiple Kubernetes clusters from one place.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we automate the whole thing with OpenTofu on a Proxmox VE cluster. You will deploy:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;An &lt;strong&gt;upstream cluster&lt;/strong&gt; (1 control plane, 1 worker) hosting Rancher and ArgoCD&lt;/li&gt;&#xA;&lt;li&gt;Two &lt;strong&gt;downstream clusters&lt;/strong&gt; named &lt;code&gt;andromeda&lt;/code&gt; and &lt;code&gt;phoenix&lt;/code&gt;, each with 3 control planes and 3 workers, provisioned by Rancher&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;Cilium L2 announcements&lt;/strong&gt; on each downstream cluster, providing a VIP for the ingress controller&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;simple web application&lt;/strong&gt; deployed to both downstream clusters via ArgoCD ApplicationSets&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;The Kubernetes flavor is &lt;strong&gt;RKE2&lt;/strong&gt;, with &lt;strong&gt;Traefik&lt;/strong&gt; as the ingress controller and &lt;strong&gt;Cilium&lt;/strong&gt; as the CNI, replacing kube-proxy and using WireGuard encryption.&lt;/p&gt;</description>
-			</item>
-			<item>
-				<title>AWS with OpenTofu: Building a Kubernetes Cluster with kubeadm</title>
-				<link>/post/2025/03/30/aws-with-opentofu-building-a-kubernetes-cluster-with-kubeadm/</link>
-				<pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
-				<guid>/post/2025/03/30/aws-with-opentofu-building-a-kubernetes-cluster-with-kubeadm/</guid>
-				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/06/03/aws-with-opentofu-deploying-a-production-gitlab-instance/&#34;&gt;previous tutorials&lt;/a&gt;, we built increasingly sophisticated AWS infrastructure. In this tutorial, we bring it all together to deploy a &lt;strong&gt;vanilla Kubernetes cluster&lt;/strong&gt; using &lt;code&gt;kubeadm&lt;/code&gt; on AWS.&lt;/p&gt;&#xA;&lt;p&gt;This is intended as a learning exercise to show you how to build a complex architecture on AWS — in production, you would prefer using EKS (the managed Kubernetes service). But understanding what happens under the hood gives you the skills to troubleshoot and customize any Kubernetes setup.&lt;/p&gt;</description>
 			</item>
 	</channel>
 </rss>

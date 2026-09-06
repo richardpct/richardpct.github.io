@@ -165,38 +165,38 @@
 <h2 id="network-design">Network design</h2>
 <p>The network is organized into three subnet groups, each spanning 3 Availability Zones:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Subnet group</th>
-          <th>Type</th>
-          <th>CIDR blocks</th>
-          <th>Contents</th>
-          <th>Internet access</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Public</td>
-          <td>Public</td>
-          <td>10.0.11.0/24, 10.0.12.0/24, 10.0.13.0/24</td>
-          <td>Bastion, External ALB, NAT Gateways</td>
-          <td>Direct via IGW</td>
-      </tr>
-      <tr>
-          <td>GitLab Private</td>
-          <td>Private</td>
-          <td>10.0.21.0/24, 10.0.22.0/24, 10.0.23.0/24</td>
-          <td>GitLab instances, Runners</td>
-          <td>Outbound via NAT</td>
-      </tr>
-      <tr>
-          <td>Private</td>
-          <td>Private</td>
-          <td>10.0.31.0/24, 10.0.32.0/24, 10.0.33.0/24</td>
-          <td>Internal ALB, PostgreSQL, Redis, EFS</td>
-          <td>None</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Subnet group</th>
+					<th>Type</th>
+					<th>CIDR blocks</th>
+					<th>Contents</th>
+					<th>Internet access</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Public</td>
+					<td>Public</td>
+					<td>10.0.11.0/24, 10.0.12.0/24, 10.0.13.0/24</td>
+					<td>Bastion, External ALB, NAT Gateways</td>
+					<td>Direct via IGW</td>
+			</tr>
+			<tr>
+					<td>GitLab Private</td>
+					<td>Private</td>
+					<td>10.0.21.0/24, 10.0.22.0/24, 10.0.23.0/24</td>
+					<td>GitLab instances, Runners</td>
+					<td>Outbound via NAT</td>
+			</tr>
+			<tr>
+					<td>Private</td>
+					<td>Private</td>
+					<td>10.0.31.0/24, 10.0.32.0/24, 10.0.33.0/24</td>
+					<td>Internal ALB, PostgreSQL, Redis, EFS</td>
+					<td>None</td>
+			</tr>
+	</tbody>
 </table>
 <p>The distinction between the two private subnet groups is important:</p>
 <ul>

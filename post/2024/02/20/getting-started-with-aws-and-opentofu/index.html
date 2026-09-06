@@ -303,22 +303,22 @@ $ make apply
 </span></span></code></pre></div><p>The default route (<code>0.0.0.0/0</code>) sends all non-local traffic to the Internet Gateway. Associating this route table with the subnet is what makes it a public subnet — instances inside it can both reach the internet and be reached from the internet (subject to security group rules).</p>
 <p>The resulting route table contains:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Destination</th>
-          <th>Target</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>10.0.0.0/16</td>
-          <td>local</td>
-      </tr>
-      <tr>
-          <td>0.0.0.0/0</td>
-          <td>Internet Gateway</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Destination</th>
+					<th>Target</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>10.0.0.0/16</td>
+					<td>local</td>
+			</tr>
+			<tr>
+					<td>0.0.0.0/0</td>
+					<td>Internet Gateway</td>
+			</tr>
+	</tbody>
 </table>
 <h4 id="01-networkoutputstf">01-network/outputs.tf</h4>
 <div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">output</span> <span style="color:#e6db74">&#34;vpc_id&#34;</span> {

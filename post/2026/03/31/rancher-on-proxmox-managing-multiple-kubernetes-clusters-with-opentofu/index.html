@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="My personal blog.">
+    <title>Rancher on Proxmox: Managing Multiple Kubernetes Clusters with OpenTofu | home</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/fonts.css" />
+    <link rel="stylesheet" href="/css/theme-override.css">
+    
+  </head>
+
+  <body>
+    <header>
+      <nav>
+        <ul>
+          
+          
+          <li class="pull-left ">
+            <a href="/">~/home</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://github.com/richardpct">~/github</a>
+          </li>
+          
+          
+          <li class="pull-left ">
+            <a href="https://www.linkedin.com/in/richard-phan-chan-the/">~/linkedin</a>
+          </li>
+          
+
+          
+
+        </ul>
+      </nav>
+    </header>
+
+
+<div class="article-meta">
+<h1><span class="title">Rancher on Proxmox: Managing Multiple Kubernetes Clusters with OpenTofu</span></h1>
+
+<h2 class="date">2026/03/31</h2>
+<p class="terms">
+  
+  
+  Categories: <a href="/categories/tutorial">tutorial</a> 
+  
+  
+  
+  Tags: <a href="/tags/proxmox">proxmox</a> <a href="/tags/opentofu">opentofu</a> <a href="/tags/terraform">terraform</a> <a href="/tags/rancher">rancher</a> <a href="/tags/kubernetes">kubernetes</a> <a href="/tags/rke2">rke2</a> <a href="/tags/cilium">cilium</a> <a href="/tags/argocd">argocd</a> 
+  
+  
+</p>
+</div>
+
+
+  
+  <div id="table-of-contents">
+    <h2>Table of Contents</h2>
+    <nav id="TableOfContents">
+  <ul>
+    <li><a href="#purpose">Purpose</a></li>
+    <li><a href="#architecture-overview">Architecture overview</a></li>
+    <li><a href="#upstream-vs-downstream">Upstream vs downstream</a></li>
+    <li><a href="#the-node-registration-flow">The node registration flow</a></li>
+    <li><a href="#proxmox-and-vm-layout">Proxmox and VM layout</a></li>
+    <li><a href="#cilium-l2-announcements-and-vips">Cilium L2 announcements and VIPs</a></li>
+    <li><a href="#argocd-and-multi-cluster-gitops">ArgoCD and multi-cluster GitOps</a></li>
+    <li><a href="#project-structure">Project structure</a></li>
+    <li><a href="#prerequisites">Prerequisites</a></li>
+    <li><a href="#prepare-your-variables">Prepare your variables</a></li>
+    <li><a href="#deploy">Deploy</a>
+      <ul>
+        <li><a href="#1-s3-bucket-for-state">1. S3 bucket for state</a></li>
+        <li><a href="#2-wildcard-tls-certificate">2. Wildcard TLS certificate</a></li>
+        <li><a href="#3-dns-records">3. DNS records</a></li>
+        <li><a href="#4-upstream-cluster">4. Upstream cluster</a></li>
+        <li><a href="#5-rancher-and-argocd">5. Rancher and ArgoCD</a></li>
+        <li><a href="#6-downstream-clusters">6. Downstream clusters</a></li>
+      </ul>
+    </li>
+    <li><a href="#test">Test</a></li>
+    <li><a href="#clean-up">Clean up</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#summary">Summary</a></li>
+  </ul>
+</nav>
+  </div>
+  
+
+
+<div class="content-wrapper">
+  <main>
+    <h2 id="purpose">Purpose</h2>
+<p>Running a single Kubernetes cluster is one thing. Running several — a production cluster, a staging cluster, each with its own lifecycle — is another problem entirely. That&rsquo;s where <strong>Rancher</strong> comes in: a management platform that provisions and operates multiple Kubernetes clusters from one place.</p>
+<p>In this tutorial, we automate the whole thing with OpenTofu on a Proxmox VE cluster. You will deploy:</p>
+<ul>
+<li>An <strong>upstream cluster</strong> (1 control plane, 1 worker) hosting Rancher and ArgoCD</li>
+<li>Two <strong>downstream clusters</strong> named <code>andromeda</code> and <code>phoenix</code>, each with 3 control planes and 3 workers, provisioned by Rancher</li>
+<li><strong>Cilium L2 announcements</strong> on each downstream cluster, providing a VIP for the ingress controller</li>
+<li>A <strong>simple web application</strong> deployed to both downstream clusters via ArgoCD ApplicationSets</li>
+</ul>
+<p>The Kubernetes flavor is <strong>RKE2</strong>, with <strong>Traefik</strong> as the ingress controller and <strong>Cilium</strong> as the CNI, replacing kube-proxy and using WireGuard encryption.</p>
+<p>The full source code is available on my <a href="https://github.com/richardpct/rancher-on-pve">GitHub repository</a>.</p>
+<h2 id="architecture-overview">Architecture overview</h2>
+<pre class="mermaid">
+  graph TB
+    You[Your Browser]
+
+    subgraph PVE[&#34;Proxmox Cluster - pve-01, pve-02, pve-03&#34;]
+        subgraph Upstream[&#34;Upstream Cluster&#34;]
+            UM[&#34;local-master-01&lt;br/&gt;192.168.1.31&#34;]
+            UW[&#34;local-worker-01&lt;br/&gt;192.168.1.41&#34;]
+            RANCHER[&#34;Rancher&#34;]
+            ARGOCD[&#34;ArgoCD&#34;]
+        end
+
+        subgraph Andromeda[&#34;Downstream: andromeda&#34;]
+            AM[&#34;3x masters&lt;br/&gt;192.168.1.32-34&#34;]
+            AW[&#34;3x workers&lt;br/&gt;192.168.1.42-44&#34;]
+            AVIP[&#34;Cilium VIP&lt;br/&gt;192.168.1.101&#34;]
+        end
+
+        subgraph Phoenix[&#34;Downstream: phoenix&#34;]
+            PM[&#34;3x masters&lt;br/&gt;192.168.1.35-37&#34;]
+            PW[&#34;3x workers&lt;br/&gt;192.168.1.45-47&#34;]
+            PVIP[&#34;Cilium VIP&lt;br/&gt;192.168.1.111&#34;]
+        end
+
+        Upstream ~~~ Andromeda
+        Andromeda ~~~ Phoenix
+    end
+
+    You -- &#34;rancher.domain / argocd.domain&#34; --&gt; UW
+    UW --&gt; RANCHER
+    UW --&gt; ARGOCD
+    RANCHER -- &#34;provisions&#34; --&gt; AM
+    RANCHER -- &#34;provisions&#34; --&gt; PM
+    ARGOCD -- &#34;deploys apps&#34; --&gt; AW
+    ARGOCD -- &#34;deploys apps&#34; --&gt; PW
+    You -- &#34;andromeda.domain&#34; --&gt; AVIP
+    You -- &#34;phoenix.domain&#34; --&gt; PVIP
+    AVIP --&gt; AW
+    PVIP --&gt; PW
+</pre>
+
+<h2 id="upstream-vs-downstream">Upstream vs downstream</h2>
+<p>The distinction between upstream and downstream clusters is central to how Rancher works:</p>
+<ul>
+<li>The <strong>upstream cluster</strong> (also called the &ldquo;local&rdquo; cluster) is where Rancher itself runs. It&rsquo;s the management plane. In this setup it also hosts ArgoCD.</li>
+<li>The <strong>downstream clusters</strong> are the ones Rancher provisions and manages. Your workloads run here.</li>
+</ul>
+<pre class="mermaid">
+  graph LR
+    TOFU[OpenTofu] -- &#34;1. Creates VMs&lt;br/&gt;installs RKE2&#34; --&gt; UP[Upstream Cluster]
+    TOFU -- &#34;2. Installs via Helm&#34; --&gt; RANCHER[Rancher + ArgoCD]
+    RANCHER -- &#34;3. Declares clusters&lt;br/&gt;rancher2_cluster_v2&#34; --&gt; REG[Registration tokens]
+    TOFU -- &#34;4. Creates VMs with&lt;br/&gt;registration command&#34; --&gt; DOWN[Downstream Clusters]
+    DOWN -- &#34;5. Nodes self-register&#34; --&gt; RANCHER
+    ARGO[ArgoCD] -- &#34;6. Deploys apps&lt;br/&gt;to both clusters&#34; --&gt; DOWN
+</pre>
+
+<p>This ordering matters and explains why the project has six sequential stacks. Rancher must exist before the downstream clusters can be declared, and the cluster declarations must exist before their nodes can register.</p>
+<h2 id="the-node-registration-flow">The node registration flow</h2>
+<p>This is the most interesting mechanism in the project. When you declare a downstream cluster in Rancher with <code>rancher2_cluster_v2</code>, Rancher generates a <strong>registration command</strong> — a shell one-liner that installs the Rancher agent and joins the node to that specific cluster.</p>
+<p>OpenTofu extracts that command from the Rancher API and injects it into the cloud-init template of every downstream VM:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;local_sensitive_file&#34; &#34;downstream_master&#34;</span> {
+</span></span><span style="display:flex;"><span>  for_each <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">rancher</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">downstream_clusters</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  filename <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;/tmp/downstream-master-${each.key}.yaml&#34;</span>
+</span></span><span style="display:flex;"><span>  content  <span style="color:#f92672">=</span> <span style="color:#66d9ef">templatefile</span>(<span style="color:#e6db74">&#34;${path.module}/cloud-init/downstream-master.yaml.tftpl&#34;</span>,
+</span></span><span style="display:flex;"><span>    {
+</span></span><span style="display:flex;"><span>      ubuntu_mirror    <span style="color:#f92672">=</span> <span style="color:#66d9ef">local</span>.<span style="color:#66d9ef">ubuntu_mirror</span>,
+</span></span><span style="display:flex;"><span>      registration_cmd <span style="color:#f92672">=</span> <span style="color:#66d9ef">data</span>.<span style="color:#66d9ef">terraform_remote_state</span>.<span style="color:#66d9ef">rancher</span>.<span style="color:#66d9ef">outputs</span>.<span style="color:#66d9ef">downstream_clusters_tokens</span>[<span style="color:#66d9ef">each</span>.<span style="color:#66d9ef">key</span>]
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>  )
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>Each cluster gets its own cloud-init file (<code>downstream-master-andromeda.yaml</code>, <code>downstream-master-phoenix.yaml</code>), uploaded to all three Proxmox nodes. When a VM boots, it runs its cluster&rsquo;s registration command and appears in Rancher automatically.</p>
+<p>The upstream cluster uses a different mechanism — there&rsquo;s no Rancher yet to hand out tokens. Instead, OpenTofu polls the first master over SSH until RKE2 has written its token to disk, reads it with an <code>external</code> data source, and templates it into the worker&rsquo;s cloud-init:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;null_resource&#34; &#34;wait_rke2_token_is_generated&#34;</span> {
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">provisioner</span> <span style="color:#e6db74">&#34;local-exec&#34;</span> {
+</span></span><span style="display:flex;"><span>    command <span style="color:#f92672">=</span> <span style="color:#960050;background-color:#1e0010">&lt;&lt;</span><span style="color:#66d9ef">EOF</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#66d9ef">while</span> <span style="color:#960050;background-color:#1e0010">!</span> <span style="color:#66d9ef">ssh</span> <span style="color:#66d9ef">ubuntu</span><span style="color:#960050;background-color:#1e0010">@</span><span style="color:#e6db74">${</span><span style="color:#960050;background-color:#1e0010">var</span>.<span style="color:#960050;background-color:#1e0010">k8s_masters</span>[<span style="color:#960050;background-color:#1e0010">0</span>].<span style="color:#960050;background-color:#1e0010">ip</span><span style="color:#e6db74">}</span> <span style="color:#960050;background-color:#1e0010">&#39;</span><span style="color:#66d9ef">sudo</span> <span style="color:#66d9ef">ls</span> <span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">var</span><span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">lib</span><span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">rancher</span><span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">rke2</span><span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">server</span><span style="color:#960050;background-color:#1e0010">/</span><span style="color:#66d9ef">token</span><span style="color:#960050;background-color:#1e0010">&#39;;</span> <span style="color:#66d9ef">do</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#66d9ef">sleep</span> <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#66d9ef">done</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">EOF</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><h2 id="proxmox-and-vm-layout">Proxmox and VM layout</h2>
+<p>Three Proxmox nodes host all 14 VMs. Masters and workers are spread across the nodes so losing one physical host doesn&rsquo;t take down a whole cluster&rsquo;s control plane:</p>
+<table>
+	<thead>
+			<tr>
+					<th>VM</th>
+					<th>IP</th>
+					<th>Proxmox node</th>
+					<th>Cluster</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>local-master-01</td>
+					<td>192.168.1.31</td>
+					<td>pve-01</td>
+					<td>upstream</td>
+			</tr>
+			<tr>
+					<td>local-worker-01</td>
+					<td>192.168.1.41</td>
+					<td>pve-02</td>
+					<td>upstream</td>
+			</tr>
+			<tr>
+					<td>andromeda-master-01/02/03</td>
+					<td>192.168.1.32-34</td>
+					<td>pve-01/02/03</td>
+					<td>andromeda</td>
+			</tr>
+			<tr>
+					<td>andromeda-worker-01/02/03</td>
+					<td>192.168.1.42-44</td>
+					<td>pve-01/02/03</td>
+					<td>andromeda</td>
+			</tr>
+			<tr>
+					<td>phoenix-master-01/02/03</td>
+					<td>192.168.1.35-37</td>
+					<td>pve-01/02/03</td>
+					<td>phoenix</td>
+			</tr>
+			<tr>
+					<td>phoenix-worker-01/02/03</td>
+					<td>192.168.1.45-47</td>
+					<td>pve-01/02/03</td>
+					<td>phoenix</td>
+			</tr>
+	</tbody>
+</table>
+<p>Each VM gets 2 cores, 4 GB RAM, and a 30 GB disk. Before creating any VM, OpenTofu SSHes into each Proxmox node, checks the SHA256 of the Ubuntu 24.04 cloud image, downloads it if needed, and converts it into a Proxmox template that all VMs are cloned from.</p>
+<h2 id="cilium-l2-announcements-and-vips">Cilium L2 announcements and VIPs</h2>
+<p>Downstream clusters have no cloud load balancer, so a <code>Service</code> of type <code>LoadBalancer</code> would normally stay stuck in <code>&lt;pending&gt;</code>. <strong>Cilium L2 announcements</strong> solve this: Cilium answers ARP requests for a pool of IPs on your LAN, making a service reachable at a fixed address.</p>
+<p>Each downstream cluster gets its own VIP range, configured in the ArgoCD ApplicationSet:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span>- <span style="color:#f92672">list</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">elements</span>:
+</span></span><span style="display:flex;"><span>      - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">andromeda</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">start_cilium_vip</span>: <span style="color:#e6db74">&#34;192.168.1.101&#34;</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">stop_cilium_vip</span>: <span style="color:#e6db74">&#34;192.168.1.109&#34;</span>
+</span></span><span style="display:flex;"><span>      - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">phoenix</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">start_cilium_vip</span>: <span style="color:#e6db74">&#34;192.168.1.111&#34;</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#f92672">stop_cilium_vip</span>: <span style="color:#e6db74">&#34;192.168.1.119&#34;</span>
+</span></span></code></pre></div><p>Traefik&rsquo;s service then requests a specific IP from that pool via a Cilium annotation, set in the cluster&rsquo;s RKE2 chart values:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">rke2-traefik</span>:
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">service</span>:
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">spec</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">type</span>: <span style="color:#ae81ff">LoadBalancer</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">annotations</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">io.cilium/lb-ipam-ips</span>: <span style="color:#e6db74">&#34;192.168.1.101&#34;</span>
+</span></span></code></pre></div><p>So <code>andromeda.yourdomain.com</code> resolves to <code>192.168.1.101</code>, which Cilium announces on the LAN, which routes to Traefik, which routes to your application. The DNS records are created in Route 53 by the <code>03-dns</code> stack.</p>
+<h2 id="argocd-and-multi-cluster-gitops">ArgoCD and multi-cluster GitOps</h2>
+<p>ArgoCD runs on the upstream cluster but deploys to both downstream clusters. For this to work, ArgoCD needs credentials for each cluster.</p>
+<p>OpenTofu generates a Rancher API token and creates one ArgoCD cluster secret per downstream cluster. The trick is that the server URL points at Rancher&rsquo;s proxy endpoint rather than the cluster&rsquo;s API directly:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-hcl" data-lang="hcl"><span style="display:flex;"><span><span style="color:#66d9ef">resource</span> <span style="color:#e6db74">&#34;kubernetes_secret_v1&#34; &#34;argocd_cluster_secrets&#34;</span> {
+</span></span><span style="display:flex;"><span>  for_each <span style="color:#f92672">=</span> <span style="color:#66d9ef">rancher2_cluster_v2</span>.<span style="color:#66d9ef">downstream_clusters</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#66d9ef">metadata</span> {
+</span></span><span style="display:flex;"><span>    name      <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;argocd-cluster-${each.value.name}&#34;</span>
+</span></span><span style="display:flex;"><span>    namespace <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;argocd&#34;</span>
+</span></span><span style="display:flex;"><span>    labels <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>      &#34;argocd.argoproj.io/secret-type&#34; <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;cluster&#34;</span>
+</span></span><span style="display:flex;"><span>      &#34;env&#34;                            <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;downstream&#34;</span>
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  data <span style="color:#f92672">=</span> {
+</span></span><span style="display:flex;"><span>    name   <span style="color:#f92672">=</span> <span style="color:#66d9ef">each</span>.<span style="color:#66d9ef">value</span>.<span style="color:#66d9ef">name</span>
+</span></span><span style="display:flex;"><span>    server <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;https://rancher.${var.my_domain}/k8s/clusters/${each.value.cluster_v1_id}&#34;</span>
+</span></span><span style="display:flex;"><span>    config <span style="color:#f92672">=</span> <span style="color:#66d9ef">jsonencode</span>({
+</span></span><span style="display:flex;"><span>      bearerToken     <span style="color:#f92672">=</span> <span style="color:#66d9ef">rancher2_token</span>.<span style="color:#66d9ef">argocd</span>.<span style="color:#66d9ef">token</span>
+</span></span><span style="display:flex;"><span>      tlsClientConfig <span style="color:#f92672">=</span> { insecure <span style="color:#f92672">=</span> <span style="color:#66d9ef">false</span> }
+</span></span><span style="display:flex;"><span>    })
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The <code>env: downstream</code> label is what makes the ApplicationSets work. The cluster generator selects clusters by that label and merges them with a list of per-cluster values:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#f92672">generators</span>:
+</span></span><span style="display:flex;"><span>  - <span style="color:#f92672">merge</span>:
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">mergeKeys</span>:
+</span></span><span style="display:flex;"><span>        - <span style="color:#ae81ff">name</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">generators</span>:
+</span></span><span style="display:flex;"><span>        - <span style="color:#f92672">clusters</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">selector</span>:
+</span></span><span style="display:flex;"><span>              <span style="color:#f92672">matchLabels</span>:
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">env</span>: <span style="color:#ae81ff">downstream</span>
+</span></span><span style="display:flex;"><span>        - <span style="color:#f92672">list</span>:
+</span></span><span style="display:flex;"><span>            <span style="color:#f92672">elements</span>:
+</span></span><span style="display:flex;"><span>              - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">andromeda</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">message</span>: <span style="color:#e6db74">&#34;Welcome to the PRODUCTION cluster: Andromeda&#34;</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">replicas</span>: <span style="color:#ae81ff">3</span>
+</span></span><span style="display:flex;"><span>              - <span style="color:#f92672">name</span>: <span style="color:#ae81ff">phoenix</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">message</span>: <span style="color:#e6db74">&#34;Welcome to the STAGING cluster: Phoenix&#34;</span>
+</span></span><span style="display:flex;"><span>                <span style="color:#f92672">replicas</span>: <span style="color:#ae81ff">1</span>
+</span></span></code></pre></div><p>One ApplicationSet definition produces two Applications, each with cluster-specific values — three replicas and a production message for andromeda, one replica and a staging message for phoenix. Adding a third cluster means adding one list element, not copying a manifest.</p>
+<h2 id="project-structure">Project structure</h2>
+<pre tabindex="0"><code>rancher-on-pve/
+├── modules/
+│   ├── bucket/               # S3 bucket for OpenTofu state
+│   ├── certificate/          # Let&#39;s Encrypt wildcard certificate
+│   ├── dns/                  # Route 53 A records
+│   ├── upstream/             # Upstream cluster VMs + RKE2
+│   │   └── cloud-init/
+│   ├── rancher/              # Rancher + ArgoCD via Helm
+│   │   ├── rancher.tf
+│   │   ├── argocd.tf
+│   │   └── helm-values/
+│   └── downstream/           # Downstream cluster VMs + registration
+│       └── cloud-init/
+└── rancher-01/
+    ├── 01-bucket/
+    ├── 02-certificate/
+    ├── 03-dns/
+    ├── 04-upstream/
+    ├── 05-rancher/
+    └── 06-downstream/
+</code></pre><h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>A Proxmox VE cluster (3 nodes in this example) with root SSH access</li>
+<li>An AWS account with a domain in Route 53 (for DNS and the Let&rsquo;s Encrypt DNS-01 challenge)</li>
+<li>OpenTofu and kubectl installed locally</li>
+<li>A Proxmox API user with permission to create VMs</li>
+</ul>
+<h2 id="prepare-your-variables">Prepare your variables</h2>
+<p>Create a file at <code>~/terraform/rancher-on-pve/tofu_vars_secrets</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>export TF_VAR_region<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_bucket<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;XXXX-rancher-tofu-eu-west-3&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_certificate<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tofu/rancher/certificate/tofu.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_dns<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tofu/rancher/dns/tofu.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_upstream<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tofu/rancher/upstream/tofu.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_rancher<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tofu/rancher/rancher/tofu.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_key_downstream<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;tofu/rancher/downstream/tofu.tfstate&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_domain<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;yourdomain.com&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_my_email<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;you@example.com&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_pm_user<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;terraform-prov@pve&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_pm_password<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_PROXMOX_PASSWORD&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_nameserver<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;192.168.1.1&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_gateway<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;192.168.1.1&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_rancher_pass<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_RANCHER_PASSWORD&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_argocd_pass<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_ARGOCD_PASSWORD&#34;</span>
+</span></span><span style="display:flex;"><span>export TF_VAR_public_ssh_key<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;ssh-ed25519 AAAA...&#34;</span>
+</span></span></code></pre></div><p>Note that <code>rancher_pass</code> must be at least 10 characters — the code lowers Rancher&rsquo;s default minimum from 12 to 10, but shorter passwords will still fail.</p>
+<h2 id="deploy">Deploy</h2>
+<h3 id="1-s3-bucket-for-state">1. S3 bucket for state</h3>
+<pre><code>$ cd rancher-01/01-bucket
+$ make apply
+</code></pre>
+<h3 id="2-wildcard-tls-certificate">2. Wildcard TLS certificate</h3>
+<pre><code>$ cd ../02-certificate
+$ make apply
+</code></pre>
+<p>Requests <code>*.yourdomain.com</code> from Let&rsquo;s Encrypt using a DNS-01 challenge on Route 53. The certificate is reused by Rancher, ArgoCD, and both downstream clusters&rsquo; Traefik instances.</p>
+<h3 id="3-dns-records">3. DNS records</h3>
+<pre><code>$ cd ../03-dns
+$ make apply
+</code></pre>
+<p>Creates four A records: <code>rancher</code> and <code>argocd</code> pointing at the upstream worker (192.168.1.41), and <code>andromeda</code> and <code>phoenix</code> pointing at their respective Cilium VIPs.</p>
+<h3 id="4-upstream-cluster">4. Upstream cluster</h3>
+<pre><code>$ cd ../04-upstream
+$ make apply
+</code></pre>
+<p>Downloads the Ubuntu cloud image to each Proxmox node, creates the two upstream VMs, installs RKE2 with Cilium, joins the worker, and writes the kubeconfig to <code>~/.kube/local</code>.</p>
+<h3 id="5-rancher-and-argocd">5. Rancher and ArgoCD</h3>
+<pre><code>$ cd ../05-rancher
+$ make apply
+</code></pre>
+<p>Installs Rancher via Helm, bootstraps the admin account, declares both downstream clusters (which generates their registration tokens), then installs ArgoCD with the cluster secrets and ApplicationSets.</p>
+<p>Wait for the pods to settle:</p>
+<pre><code>$ export KUBECONFIG=~/.kube/local
+$ kubectl get po -A
+</code></pre>
+<h3 id="6-downstream-clusters">6. Downstream clusters</h3>
+<pre><code>$ cd ../06-downstream
+$ make apply
+</code></pre>
+<p>Creates the 12 downstream VMs. Each boots, runs its cluster&rsquo;s registration command, and joins the right cluster. OpenTofu waits until each cluster responds, then installs the wildcard TLS certificate into <code>kube-system</code> so Traefik can serve HTTPS. Kubeconfigs land at <code>~/.kube/andromeda</code> and <code>~/.kube/phoenix</code>.</p>
+<h2 id="test">Test</h2>
+<p>Open <code>https://rancher.yourdomain.com</code>, go to <strong>Cluster Management</strong>, and wait for both downstream clusters to reach <strong>Active</strong>. This takes several minutes while the nodes register and RKE2 converges.</p>
+<p>Check each cluster from the CLI:</p>
+<pre><code>$ export KUBECONFIG=~/.kube/andromeda
+$ kubectl get nodes
+$ export KUBECONFIG=~/.kube/phoenix
+$ kubectl get nodes
+</code></pre>
+<p>Open <code>https://argocd.yourdomain.com</code> and log in as <code>admin</code>. You should see four applications — <code>cilium-l2-andromeda</code>, <code>cilium-l2-phoenix</code>, <code>simple-web-andromeda</code>, <code>simple-web-phoenix</code> — all Healthy and Synced. If any are out of sync, hit Refresh or Sync.</p>
+<p>Once everything is green:</p>
+<pre><code>$ curl https://andromeda.yourdomain.com
+$ curl https://phoenix.yourdomain.com
+</code></pre>
+<p>Each returns its own message, and andromeda runs three replicas against phoenix&rsquo;s one — the per-cluster values from the ApplicationSet.</p>
+<h2 id="clean-up">Clean up</h2>
+<p>Destroy in reverse order:</p>
+<pre><code>$ cd rancher-01/06-downstream
+$ make destroy
+$ cd ../05-rancher
+$ make destroy
+$ cd ../04-upstream
+$ make destroy
+$ cd ../03-dns
+$ make destroy
+$ cd ../02-certificate
+$ make destroy
+$ cd ../01-bucket
+$ make destroy
+</code></pre>
+<h2 id="limitations">Limitations</h2>
+<p>Two things to be aware of before adapting this for anything serious:</p>
+<ul>
+<li><strong>The upstream cluster is not highly available.</strong> It runs a single control plane and a single worker, so losing either takes Rancher and ArgoCD offline. The downstream clusters keep running — they don&rsquo;t depend on Rancher to function — but you lose management and GitOps until it&rsquo;s back. Making it HA means adding masters and putting a VIP in front of the API server.</li>
+<li><strong>The ArgoCD token has full Rancher permissions.</strong> Fine for a lab, not for production. Scope it to the specific projects and namespaces ArgoCD actually needs.</li>
+</ul>
+<h2 id="summary">Summary</h2>
+<p>You now have a Rancher management plane provisioning two independent RKE2 clusters, each with its own Cilium VIP and HTTPS ingress, with applications delivered by ArgoCD from a single ApplicationSet definition.</p>
+<p>The pattern worth taking away is the layering: OpenTofu builds the upstream cluster imperatively, Rancher declares the downstream clusters, the nodes self-register using tokens Rancher generated, and ArgoCD takes over application delivery from there. Each layer hands off to the next, and adding a third cluster is a matter of a few lines in three files.</p>
+
+    <a href="/"> >> Home</a>
+  </main>
+</div>
+    <footer>
+      
+      
+      <script>
+      (function() {
+        function center_el(tagName) {
+          var tags = document.getElementsByTagName(tagName), i, tag;
+          for (i = 0; i < tags.length; i++) {
+            tag = tags[i];
+            var parent = tag.parentElement;
+            
+            if (parent.childNodes.length === 1) {
+              
+              if (parent.nodeName === 'A') {
+                parent = parent.parentElement;
+                if (parent.childNodes.length != 1) continue;
+              }
+              if (parent.nodeName === 'P') parent.style.textAlign = 'center';
+            }
+          }
+        }
+        var tagNames = ['img', 'embed', 'object'];
+        for (var i = 0; i < tagNames.length; i++) {
+          center_el(tagNames[i]);
+        }
+      })();
+      </script>
+      
+      <hr/>
+      © 2026 · Powered by the <a href="https://github.com/goodroot/hugo-classic">Classic theme</a> for <a href="https://gohugo.io/">Hugo</a>.
+      
+    </footer>
+    
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true });
+    </script>
+    
+  </body>
+</html>
+

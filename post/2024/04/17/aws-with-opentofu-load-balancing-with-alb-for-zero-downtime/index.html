@@ -198,46 +198,46 @@
 <h3 id="five-subnet-groups">Five subnet groups</h3>
 <p>The network now has 5 groups of subnets, each spanning 3 AZs — for a total of 15 subnets:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Subnet group</th>
-          <th>Type</th>
-          <th>CIDR blocks</th>
-          <th>Purpose</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>ALB</td>
-          <td>Public</td>
-          <td>10.0.11-13.0/24</td>
-          <td>Load Balancer endpoints</td>
-      </tr>
-      <tr>
-          <td>NAT</td>
-          <td>Public</td>
-          <td>10.0.21-23.0/24</td>
-          <td>NAT Gateways (one per AZ)</td>
-      </tr>
-      <tr>
-          <td>Bastion</td>
-          <td>Public</td>
-          <td>10.0.31-33.0/24</td>
-          <td>SSH jump server</td>
-      </tr>
-      <tr>
-          <td>Web</td>
-          <td>Private</td>
-          <td>10.0.41-43.0/24</td>
-          <td>Webserver instances</td>
-      </tr>
-      <tr>
-          <td>Redis</td>
-          <td>Private</td>
-          <td>10.0.51-53.0/24</td>
-          <td>ElastiCache Redis</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Subnet group</th>
+					<th>Type</th>
+					<th>CIDR blocks</th>
+					<th>Purpose</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>ALB</td>
+					<td>Public</td>
+					<td>10.0.11-13.0/24</td>
+					<td>Load Balancer endpoints</td>
+			</tr>
+			<tr>
+					<td>NAT</td>
+					<td>Public</td>
+					<td>10.0.21-23.0/24</td>
+					<td>NAT Gateways (one per AZ)</td>
+			</tr>
+			<tr>
+					<td>Bastion</td>
+					<td>Public</td>
+					<td>10.0.31-33.0/24</td>
+					<td>SSH jump server</td>
+			</tr>
+			<tr>
+					<td>Web</td>
+					<td>Private</td>
+					<td>10.0.41-43.0/24</td>
+					<td>Webserver instances</td>
+			</tr>
+			<tr>
+					<td>Redis</td>
+					<td>Private</td>
+					<td>10.0.51-53.0/24</td>
+					<td>ElastiCache Redis</td>
+			</tr>
+	</tbody>
 </table>
 <p>Public subnets route through the Internet Gateway. Private subnets route through the NAT Gateway in their respective AZ.</p>
 <h2 id="the-application-load-balancer">The Application Load Balancer</h2>

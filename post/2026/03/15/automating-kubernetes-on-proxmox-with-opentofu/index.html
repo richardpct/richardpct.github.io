@@ -213,54 +213,54 @@
 </span></span><span style="display:flex;"><span>export TF_VAR_gitlab_password<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_GITLAB_PASSWORD&#34;</span>
 </span></span><span style="display:flex;"><span>export TF_VAR_grafana_password<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;YOUR_GRAFANA_PASSWORD&#34;</span>
 </span></span></code></pre></div><table>
-  <thead>
-      <tr>
-          <th>Variable</th>
-          <th>Description</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td><code>YOUR_BUCKET</code></td>
-          <td>A globally unique S3 bucket name for Terraform state</td>
-      </tr>
-      <tr>
-          <td><code>YOUR_DOMAIN</code></td>
-          <td>Your Route 53 registered domain (e.g., <code>example.com</code>)</td>
-      </tr>
-      <tr>
-          <td><code>YOUR_MAIL</code></td>
-          <td>Email for Let&rsquo;s Encrypt registration</td>
-      </tr>
-      <tr>
-          <td><code>YOUR_PVE_PASSWORD</code></td>
-          <td>Password for the <code>terraform-prov@pve</code> Proxmox user</td>
-      </tr>
-      <tr>
-          <td><code>YOUR_NAMESERVER</code></td>
-          <td>Your local DNS resolver, typically your home router IP</td>
-      </tr>
-      <tr>
-          <td><code>YOUR_GATEWAY</code></td>
-          <td>Your LAN gateway for internet access, typically your home router IP</td>
-      </tr>
-      <tr>
-          <td><code>YOUR_PVE_IP</code></td>
-          <td>IP of any Proxmox node (used to retrieve Ceph credentials via SSH)</td>
-      </tr>
-      <tr>
-          <td><code>YOUR_VAULT_TOKEN</code></td>
-          <td>Root token for Vault</td>
-      </tr>
-      <tr>
-          <td><code>YOUR_GITLAB_PASSWORD</code></td>
-          <td>Root password for the GitLab instance</td>
-      </tr>
-      <tr>
-          <td><code>YOUR_GRAFANA_PASSWORD</code></td>
-          <td>Admin password for Grafana</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Variable</th>
+					<th>Description</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td><code>YOUR_BUCKET</code></td>
+					<td>A globally unique S3 bucket name for Terraform state</td>
+			</tr>
+			<tr>
+					<td><code>YOUR_DOMAIN</code></td>
+					<td>Your Route 53 registered domain (e.g., <code>example.com</code>)</td>
+			</tr>
+			<tr>
+					<td><code>YOUR_MAIL</code></td>
+					<td>Email for Let&rsquo;s Encrypt registration</td>
+			</tr>
+			<tr>
+					<td><code>YOUR_PVE_PASSWORD</code></td>
+					<td>Password for the <code>terraform-prov@pve</code> Proxmox user</td>
+			</tr>
+			<tr>
+					<td><code>YOUR_NAMESERVER</code></td>
+					<td>Your local DNS resolver, typically your home router IP</td>
+			</tr>
+			<tr>
+					<td><code>YOUR_GATEWAY</code></td>
+					<td>Your LAN gateway for internet access, typically your home router IP</td>
+			</tr>
+			<tr>
+					<td><code>YOUR_PVE_IP</code></td>
+					<td>IP of any Proxmox node (used to retrieve Ceph credentials via SSH)</td>
+			</tr>
+			<tr>
+					<td><code>YOUR_VAULT_TOKEN</code></td>
+					<td>Root token for Vault</td>
+			</tr>
+			<tr>
+					<td><code>YOUR_GITLAB_PASSWORD</code></td>
+					<td>Root password for the GitLab instance</td>
+			</tr>
+			<tr>
+					<td><code>YOUR_GRAFANA_PASSWORD</code></td>
+					<td>Admin password for Grafana</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="deploy-the-infrastructure">Deploy the Infrastructure</h2>
 <p>Each step is deployed sequentially from the <code>cluster-01/</code> directory. The Makefiles handle <code>tofu init</code> and secret sourcing automatically.</p>

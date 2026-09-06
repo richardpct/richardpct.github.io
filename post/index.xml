@@ -1,96 +1,108 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
-  <channel>
-    <title>Posts on home</title>
-    <link>/post/</link>
-    <description>Recent content in Posts on home</description>
-    <generator>Hugo</generator>
-    <language>en-us</language>
-    <lastBuildDate>Sun, 15 Mar 2026 12:19:28 +0100</lastBuildDate>
-    <atom:link href="/post/index.xml" rel="self" type="application/rss+xml" />
-    <item>
-      <title>Automating Kubernetes on Proxmox with OpenTofu</title>
-      <link>/post/2026/03/15/automating-kubernetes-on-proxmox-with-opentofu/</link>
-      <pubDate>Sun, 15 Mar 2026 12:19:28 +0100</pubDate>
-      <guid>/post/2026/03/15/automating-kubernetes-on-proxmox-with-opentofu/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;After deploying your Proxmox cluster in &lt;a href=&#34;https://richardpct.github.io/post/2026/01/05/automating-proxmox-ceph-with-ansible/&#34;&gt;my previous article&lt;/a&gt;, this project is intended to show you how to deploy a Kubernetes cluster in high availability on your Proxmox cluster using Terraform/OpenTofu with the Telmate provider. The full source code is available on &lt;a href=&#34;https://github.com/richardpct/k8s-on-proxmox&#34;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;p&gt;This project fully automates the deployment of a &lt;strong&gt;production-grade, highly available Kubernetes cluster&lt;/strong&gt; on a Proxmox VE hypervisor cluster using OpenTofu (Terraform-compatible). Starting from bare Proxmox nodes, a single sequence of &lt;code&gt;make apply&lt;/code&gt; commands provisions all the infrastructure, bootstraps Kubernetes, and deploys a complete application platform — with no manual SSH or &lt;code&gt;kubectl&lt;/code&gt; steps required.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>Automating Proxmox &amp; Ceph with Ansible</title>
-      <link>/post/2026/01/05/automating-proxmox-ceph-with-ansible/</link>
-      <pubDate>Mon, 05 Jan 2026 21:14:27 +0100</pubDate>
-      <guid>/post/2026/01/05/automating-proxmox-ceph-with-ansible/</guid>
-      <description>&lt;p&gt;Setting up a high-availability Proxmox VE (PVE) cluster with Ceph storage is a&#xA;rite of passage for many homelab enthusiasts. While the GUI is fantastic,&#xA;automating the process ensures reproducibility and saves time on rebuilds.&#xA;&lt;br /&gt;&#xA;In this post, I’ll walk through an Ansible playbook I wrote to configure a&#xA;3-node PVE cluster, deploy Ceph (including a specific partition setup for NVMe),&#xA;and prepare the system for Terraform/OpenTofu provisioning.&#xA;&lt;br /&gt;&#xA;You can find the full repository &lt;a href=&#34;https://github.com/richardpct/pve-homelab&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: Building a Kubernetes Cluster with kubeadm</title>
-      <link>/post/2025/03/30/aws-with-opentofu-building-a-kubernetes-cluster-with-kubeadm/</link>
-      <pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
-      <guid>/post/2025/03/30/aws-with-opentofu-building-a-kubernetes-cluster-with-kubeadm/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/06/03/aws-with-opentofu-deploying-a-production-gitlab-instance/&#34;&gt;previous tutorials&lt;/a&gt;, we built increasingly sophisticated AWS infrastructure. In this tutorial, we bring it all together to deploy a &lt;strong&gt;vanilla Kubernetes cluster&lt;/strong&gt; using &lt;code&gt;kubeadm&lt;/code&gt; on AWS.&lt;/p&gt;&#xA;&lt;p&gt;This is intended as a learning exercise to show you how to build a complex architecture on AWS — in production, you would prefer using EKS (the managed Kubernetes service). But understanding what happens under the hood gives you the skills to troubleshoot and customize any Kubernetes setup.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: Deploying a Production GitLab Instance</title>
-      <link>/post/2024/06/03/aws-with-opentofu-deploying-a-production-gitlab-instance/</link>
-      <pubDate>Mon, 03 Jun 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/06/03/aws-with-opentofu-deploying-a-production-gitlab-instance/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/&#34;&gt;previous tutorials&lt;/a&gt;, we progressively built up an AWS infrastructure from a single EC2 instance to an auto-scaling fleet behind a load balancer. In this tutorial, we apply everything we have learned to deploy a real-world application: &lt;strong&gt;GitLab&lt;/strong&gt;.&lt;/p&gt;&#xA;&lt;p&gt;GitLab is one of the most widely used Git repository managers in the world, and it includes a built-in CI/CD pipeline engine called &lt;strong&gt;Runners&lt;/strong&gt;. For building this infrastructure, I followed the &lt;a href=&#34;https://docs.gitlab.com/ee/install/aws/&#34;&gt;official GitLab installation guide for AWS&lt;/a&gt;, with one simplification: instead of using a separate Gitaly service for Git repository storage, I use a shared NFS filesystem via AWS EFS. This keeps the architecture simpler while still supporting multiple GitLab instances.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: Auto Scaling Based on CPU Utilization</title>
-      <link>/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/</link>
-      <pubDate>Tue, 23 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;/post/2024/04/17/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/&#34;&gt;previous tutorial&lt;/a&gt;, we deployed two webservers behind an Application Load Balancer for zero-downtime failover. The ASG maintained exactly 2 instances at all times — no more, no less. But what happens when traffic spikes and your two servers can&amp;rsquo;t keep up?&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we add an &lt;strong&gt;auto scaling policy&lt;/strong&gt; so that the ASG can dynamically scale out from 2 to 3 webservers when the average CPU utilization crosses a threshold, and scale back in when the load drops. This is the difference between a fixed fleet and an elastic one — AWS automatically adjusts capacity to match demand.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: Load Balancing with ALB for Zero Downtime</title>
-      <link>/post/2024/04/17/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/</link>
-      <pubDate>Wed, 17 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/04/17/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/&#34;&gt;previous tutorial&lt;/a&gt;, we made our infrastructure self-healing with Auto Scaling Groups. If the webserver crashed, the ASG replaced it — but there was still a brief downtime while the new instance booted. In production, even a few minutes of downtime is unacceptable.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we solve this by adding an &lt;strong&gt;Application Load Balancer&lt;/strong&gt; (ALB) in front of &lt;strong&gt;two webservers&lt;/strong&gt;. The ALB distributes requests between them, and if one webserver fails, the other keeps serving traffic immediately — zero downtime. The ASG then replaces the failed instance in the background.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: High Availability with Auto Scaling Groups</title>
-      <link>/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</link>
-      <pubDate>Fri, 05 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/&#34;&gt;previous tutorial&lt;/a&gt;, we secured our infrastructure with a bastion host. But there was still a weakness: if the bastion or the webserver crashed, they stayed down until someone manually intervened. In production, that&amp;rsquo;s not acceptable.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we introduce &lt;strong&gt;Auto Scaling Groups&lt;/strong&gt; (ASG) to make the bastion and webserver self-healing. If an instance fails or is terminated for any reason, the ASG automatically launches a replacement — your service experiences only a brief downtime rather than a full outage.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: Adding a Bastion Host for Secure SSH Access</title>
-      <link>/post/2024/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/</link>
-      <pubDate>Wed, 27 Mar 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/&#34;&gt;previous tutorial&lt;/a&gt;, we isolated our Redis database in a private subnet. But there was a security gap: the webserver still accepted SSH connections directly from the internet (restricted to your IP, but still exposed). If the webserver is compromised via SSH, an attacker has a direct foothold in your VPC.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we add a &lt;strong&gt;bastion host&lt;/strong&gt; (also called a jump server) to solve this problem. The bastion is the only instance that accepts SSH from the internet. To reach the webserver or the database via SSH, you must first jump through the bastion. This is a standard security pattern in production infrastructure.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: Public and Private Subnets with a Database</title>
-      <link>/post/2024/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/</link>
-      <pubDate>Sat, 16 Mar 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;/post/2024/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/&#34;&gt;previous tutorial&lt;/a&gt;, we deployed our infrastructure across multiple environments using modules. In this tutorial, we introduce a much more realistic network topology: a &lt;strong&gt;public subnet&lt;/strong&gt; and a &lt;strong&gt;private subnet&lt;/strong&gt; within the same VPC.&lt;/p&gt;&#xA;&lt;p&gt;The scenario is based on the AWS reference architecture &lt;a href=&#34;https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Scenario2.html?shortFooter=true&#34;&gt;VPC with Public and Private Subnets (NAT)&lt;/a&gt;. You will build:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;A &lt;strong&gt;VPC&lt;/strong&gt; with a public subnet and a private subnet&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;webserver&lt;/strong&gt; in the public subnet, running a Python CGI application&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;Redis database&lt;/strong&gt; in the private subnet, counting page requests — only the webserver is allowed to connect to it, enforced by security groups&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;NAT Gateway&lt;/strong&gt; with an Elastic IP in the public subnet, so the database can reach the internet for package updates without being exposed to incoming traffic&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;Note: for this exercise I intentionally do not use the ElastiCache managed service. Instead, I install Redis on a plain EC2 instance to keep full control and demonstrate the networking concepts.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: Multi-Environment Deployments with Modules</title>
-      <link>/post/2024/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/</link>
-      <pubDate>Wed, 06 Mar 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/03/04/aws-with-opentofu-refactoring-with-modules/&#34;&gt;previous tutorial&lt;/a&gt;, we refactored our infrastructure code into reusable modules. In this tutorial, we put those modules to real use by deploying the same infrastructure across &lt;strong&gt;multiple environments&lt;/strong&gt; — Dev and Staging — each running in its own AWS account with its own network configuration.&lt;/p&gt;&#xA;&lt;p&gt;Along the way, we introduce four practical improvements over the previous tutorials:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;&lt;strong&gt;Multi-environment deployment&lt;/strong&gt; — the same modules are called from separate &lt;code&gt;envs/dev/&lt;/code&gt; and &lt;code&gt;envs/staging/&lt;/code&gt; directories with different parameters&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;User-data for automated provisioning&lt;/strong&gt; — Nginx is installed automatically when the instance boots, no more manual SSH&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;SSH restricted to your IP&lt;/strong&gt; — the security group only allows SSH from your own public IP address, not from the entire internet&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;Dynamic AMI selection&lt;/strong&gt; — instead of hardcoding an AMI ID, we use the &lt;code&gt;aws_ami&lt;/code&gt; data source to always pick the latest Amazon Linux image&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;The full source code is available on my &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto03&#34;&gt;GitHub repository&lt;/a&gt;.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: Refactoring with Modules</title>
-      <link>/post/2024/03/04/aws-with-opentofu-refactoring-with-modules/</link>
-      <pubDate>Mon, 04 Mar 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/03/04/aws-with-opentofu-refactoring-with-modules/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial builds on &lt;a href=&#34;https://richardpct.github.io/post/2024/02/20/getting-started-with-aws-and-opentofu/&#34;&gt;the previous one&lt;/a&gt; where we deployed a web server on AWS using OpenTofu. The infrastructure we built works, but all the resource definitions live directly in the stack directories. If we wanted to create a second environment (staging, production), we would have to copy-paste all that code — and as any developer knows, that&amp;rsquo;s a recipe for bugs and drift.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we refactor the code by introducing &lt;strong&gt;modules&lt;/strong&gt;. A module in OpenTofu works like a function in a programming language: it encapsulates a reusable piece of infrastructure and accepts parameters. You write it once, and call it as many times as you need with different values.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>Getting Started with AWS and OpenTofu</title>
-      <link>/post/2024/02/20/getting-started-with-aws-and-opentofu/</link>
-      <pubDate>Tue, 20 Feb 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/02/20/getting-started-with-aws-and-opentofu/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;I will show you how to build a simple AWS infrastructure using OpenTofu (an open-source Terraform alternative) for your first steps with Infrastructure as Code.&lt;/p&gt;&#xA;&lt;p&gt;The example I have chosen is based on &lt;a href=&#34;https://docs.aws.amazon.com/vpc/latest/userguide/get-started-ipv6.html&#34;&gt;the Getting Started with IPv6 for Amazon VPC&lt;/a&gt;. By the end of this tutorial, you will have created an EC2 instance running a web server, fully deployed and managed through code.&lt;/p&gt;&#xA;&lt;p&gt;The full source code is available on my &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto01&#34;&gt;GitHub repository&lt;/a&gt;.&lt;/p&gt;</description>
-    </item>
-  </channel>
+	<channel>
+		<title>Posts on home</title>
+		<link>/post/</link>
+		<description>Recent content in Posts on home</description>
+		<generator>Hugo</generator>
+		<language>en-us</language>
+		
+		
+		
+		
+			<lastBuildDate>Tue, 31 Mar 2026 00:00:00 +0000</lastBuildDate>
+		
+			<atom:link href="/post/index.xml" rel="self" type="application/rss+xml" />
+			<item>
+				<title>Rancher on Proxmox: Managing Multiple Kubernetes Clusters with OpenTofu</title>
+				<link>/post/2026/03/31/rancher-on-proxmox-managing-multiple-kubernetes-clusters-with-opentofu/</link>
+				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
+				<guid>/post/2026/03/31/rancher-on-proxmox-managing-multiple-kubernetes-clusters-with-opentofu/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;Running a single Kubernetes cluster is one thing. Running several — a production cluster, a staging cluster, each with its own lifecycle — is another problem entirely. That&amp;rsquo;s where &lt;strong&gt;Rancher&lt;/strong&gt; comes in: a management platform that provisions and operates multiple Kubernetes clusters from one place.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we automate the whole thing with OpenTofu on a Proxmox VE cluster. You will deploy:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;An &lt;strong&gt;upstream cluster&lt;/strong&gt; (1 control plane, 1 worker) hosting Rancher and ArgoCD&lt;/li&gt;&#xA;&lt;li&gt;Two &lt;strong&gt;downstream clusters&lt;/strong&gt; named &lt;code&gt;andromeda&lt;/code&gt; and &lt;code&gt;phoenix&lt;/code&gt;, each with 3 control planes and 3 workers, provisioned by Rancher&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;Cilium L2 announcements&lt;/strong&gt; on each downstream cluster, providing a VIP for the ingress controller&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;simple web application&lt;/strong&gt; deployed to both downstream clusters via ArgoCD ApplicationSets&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;The Kubernetes flavor is &lt;strong&gt;RKE2&lt;/strong&gt;, with &lt;strong&gt;Traefik&lt;/strong&gt; as the ingress controller and &lt;strong&gt;Cilium&lt;/strong&gt; as the CNI, replacing kube-proxy and using WireGuard encryption.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>Automating Kubernetes on Proxmox with OpenTofu</title>
+				<link>/post/2026/03/15/automating-kubernetes-on-proxmox-with-opentofu/</link>
+				<pubDate>Sun, 15 Mar 2026 12:19:28 +0100</pubDate>
+				<guid>/post/2026/03/15/automating-kubernetes-on-proxmox-with-opentofu/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;After deploying your Proxmox cluster in &lt;a href=&#34;https://richardpct.github.io/post/2026/01/05/automating-proxmox-ceph-with-ansible/&#34;&gt;my previous article&lt;/a&gt;, this project is intended to show you how to deploy a Kubernetes cluster in high availability on your Proxmox cluster using Terraform/OpenTofu with the Telmate provider. The full source code is available on &lt;a href=&#34;https://github.com/richardpct/k8s-on-proxmox&#34;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;&#xA;&lt;p&gt;This project fully automates the deployment of a &lt;strong&gt;production-grade, highly available Kubernetes cluster&lt;/strong&gt; on a Proxmox VE hypervisor cluster using OpenTofu (Terraform-compatible). Starting from bare Proxmox nodes, a single sequence of &lt;code&gt;make apply&lt;/code&gt; commands provisions all the infrastructure, bootstraps Kubernetes, and deploys a complete application platform — with no manual SSH or &lt;code&gt;kubectl&lt;/code&gt; steps required.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>Automating Proxmox &amp; Ceph with Ansible</title>
+				<link>/post/2026/01/05/automating-proxmox-ceph-with-ansible/</link>
+				<pubDate>Mon, 05 Jan 2026 21:14:27 +0100</pubDate>
+				<guid>/post/2026/01/05/automating-proxmox-ceph-with-ansible/</guid>
+				<description>&lt;p&gt;Setting up a high-availability Proxmox VE (PVE) cluster with Ceph storage is a&#xA;rite of passage for many homelab enthusiasts. While the GUI is fantastic,&#xA;automating the process ensures reproducibility and saves time on rebuilds.&#xA;&lt;br /&gt;&#xA;In this post, I’ll walk through an Ansible playbook I wrote to configure a&#xA;3-node PVE cluster, deploy Ceph (including a specific partition setup for NVMe),&#xA;and prepare the system for Terraform/OpenTofu provisioning.&#xA;&lt;br /&gt;&#xA;You can find the full repository &lt;a href=&#34;https://github.com/richardpct/pve-homelab&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: Building a Kubernetes Cluster with kubeadm</title>
+				<link>/post/2025/03/30/aws-with-opentofu-building-a-kubernetes-cluster-with-kubeadm/</link>
+				<pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
+				<guid>/post/2025/03/30/aws-with-opentofu-building-a-kubernetes-cluster-with-kubeadm/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/06/03/aws-with-opentofu-deploying-a-production-gitlab-instance/&#34;&gt;previous tutorials&lt;/a&gt;, we built increasingly sophisticated AWS infrastructure. In this tutorial, we bring it all together to deploy a &lt;strong&gt;vanilla Kubernetes cluster&lt;/strong&gt; using &lt;code&gt;kubeadm&lt;/code&gt; on AWS.&lt;/p&gt;&#xA;&lt;p&gt;This is intended as a learning exercise to show you how to build a complex architecture on AWS — in production, you would prefer using EKS (the managed Kubernetes service). But understanding what happens under the hood gives you the skills to troubleshoot and customize any Kubernetes setup.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: Deploying a Production GitLab Instance</title>
+				<link>/post/2024/06/03/aws-with-opentofu-deploying-a-production-gitlab-instance/</link>
+				<pubDate>Mon, 03 Jun 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/06/03/aws-with-opentofu-deploying-a-production-gitlab-instance/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/&#34;&gt;previous tutorials&lt;/a&gt;, we progressively built up an AWS infrastructure from a single EC2 instance to an auto-scaling fleet behind a load balancer. In this tutorial, we apply everything we have learned to deploy a real-world application: &lt;strong&gt;GitLab&lt;/strong&gt;.&lt;/p&gt;&#xA;&lt;p&gt;GitLab is one of the most widely used Git repository managers in the world, and it includes a built-in CI/CD pipeline engine called &lt;strong&gt;Runners&lt;/strong&gt;. For building this infrastructure, I followed the &lt;a href=&#34;https://docs.gitlab.com/ee/install/aws/&#34;&gt;official GitLab installation guide for AWS&lt;/a&gt;, with one simplification: instead of using a separate Gitaly service for Git repository storage, I use a shared NFS filesystem via AWS EFS. This keeps the architecture simpler while still supporting multiple GitLab instances.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: Auto Scaling Based on CPU Utilization</title>
+				<link>/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/</link>
+				<pubDate>Tue, 23 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;/post/2024/04/17/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/&#34;&gt;previous tutorial&lt;/a&gt;, we deployed two webservers behind an Application Load Balancer for zero-downtime failover. The ASG maintained exactly 2 instances at all times — no more, no less. But what happens when traffic spikes and your two servers can&amp;rsquo;t keep up?&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we add an &lt;strong&gt;auto scaling policy&lt;/strong&gt; so that the ASG can dynamically scale out from 2 to 3 webservers when the average CPU utilization crosses a threshold, and scale back in when the load drops. This is the difference between a fixed fleet and an elastic one — AWS automatically adjusts capacity to match demand.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: Load Balancing with ALB for Zero Downtime</title>
+				<link>/post/2024/04/17/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/</link>
+				<pubDate>Wed, 17 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/04/17/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/&#34;&gt;previous tutorial&lt;/a&gt;, we made our infrastructure self-healing with Auto Scaling Groups. If the webserver crashed, the ASG replaced it — but there was still a brief downtime while the new instance booted. In production, even a few minutes of downtime is unacceptable.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we solve this by adding an &lt;strong&gt;Application Load Balancer&lt;/strong&gt; (ALB) in front of &lt;strong&gt;two webservers&lt;/strong&gt;. The ALB distributes requests between them, and if one webserver fails, the other keeps serving traffic immediately — zero downtime. The ASG then replaces the failed instance in the background.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: High Availability with Auto Scaling Groups</title>
+				<link>/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</link>
+				<pubDate>Fri, 05 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/&#34;&gt;previous tutorial&lt;/a&gt;, we secured our infrastructure with a bastion host. But there was still a weakness: if the bastion or the webserver crashed, they stayed down until someone manually intervened. In production, that&amp;rsquo;s not acceptable.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we introduce &lt;strong&gt;Auto Scaling Groups&lt;/strong&gt; (ASG) to make the bastion and webserver self-healing. If an instance fails or is terminated for any reason, the ASG automatically launches a replacement — your service experiences only a brief downtime rather than a full outage.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: Adding a Bastion Host for Secure SSH Access</title>
+				<link>/post/2024/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/</link>
+				<pubDate>Wed, 27 Mar 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/&#34;&gt;previous tutorial&lt;/a&gt;, we isolated our Redis database in a private subnet. But there was a security gap: the webserver still accepted SSH connections directly from the internet (restricted to your IP, but still exposed). If the webserver is compromised via SSH, an attacker has a direct foothold in your VPC.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we add a &lt;strong&gt;bastion host&lt;/strong&gt; (also called a jump server) to solve this problem. The bastion is the only instance that accepts SSH from the internet. To reach the webserver or the database via SSH, you must first jump through the bastion. This is a standard security pattern in production infrastructure.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: Public and Private Subnets with a Database</title>
+				<link>/post/2024/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/</link>
+				<pubDate>Sat, 16 Mar 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/03/16/aws-with-opentofu-public-and-private-subnets-with-a-database/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;/post/2024/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/&#34;&gt;previous tutorial&lt;/a&gt;, we deployed our infrastructure across multiple environments using modules. In this tutorial, we introduce a much more realistic network topology: a &lt;strong&gt;public subnet&lt;/strong&gt; and a &lt;strong&gt;private subnet&lt;/strong&gt; within the same VPC.&lt;/p&gt;&#xA;&lt;p&gt;The scenario is based on the AWS reference architecture &lt;a href=&#34;https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Scenario2.html?shortFooter=true&#34;&gt;VPC with Public and Private Subnets (NAT)&lt;/a&gt;. You will build:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;A &lt;strong&gt;VPC&lt;/strong&gt; with a public subnet and a private subnet&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;webserver&lt;/strong&gt; in the public subnet, running a Python CGI application&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;Redis database&lt;/strong&gt; in the private subnet, counting page requests — only the webserver is allowed to connect to it, enforced by security groups&lt;/li&gt;&#xA;&lt;li&gt;A &lt;strong&gt;NAT Gateway&lt;/strong&gt; with an Elastic IP in the public subnet, so the database can reach the internet for package updates without being exposed to incoming traffic&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;Note: for this exercise I intentionally do not use the ElastiCache managed service. Instead, I install Redis on a plain EC2 instance to keep full control and demonstrate the networking concepts.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: Multi-Environment Deployments with Modules</title>
+				<link>/post/2024/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/</link>
+				<pubDate>Wed, 06 Mar 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/03/06/aws-with-opentofu-multi-environment-deployments-with-modules/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/03/04/aws-with-opentofu-refactoring-with-modules/&#34;&gt;previous tutorial&lt;/a&gt;, we refactored our infrastructure code into reusable modules. In this tutorial, we put those modules to real use by deploying the same infrastructure across &lt;strong&gt;multiple environments&lt;/strong&gt; — Dev and Staging — each running in its own AWS account with its own network configuration.&lt;/p&gt;&#xA;&lt;p&gt;Along the way, we introduce four practical improvements over the previous tutorials:&lt;/p&gt;&#xA;&lt;ul&gt;&#xA;&lt;li&gt;&lt;strong&gt;Multi-environment deployment&lt;/strong&gt; — the same modules are called from separate &lt;code&gt;envs/dev/&lt;/code&gt; and &lt;code&gt;envs/staging/&lt;/code&gt; directories with different parameters&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;User-data for automated provisioning&lt;/strong&gt; — Nginx is installed automatically when the instance boots, no more manual SSH&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;SSH restricted to your IP&lt;/strong&gt; — the security group only allows SSH from your own public IP address, not from the entire internet&lt;/li&gt;&#xA;&lt;li&gt;&lt;strong&gt;Dynamic AMI selection&lt;/strong&gt; — instead of hardcoding an AMI ID, we use the &lt;code&gt;aws_ami&lt;/code&gt; data source to always pick the latest Amazon Linux image&lt;/li&gt;&#xA;&lt;/ul&gt;&#xA;&lt;p&gt;The full source code is available on my &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto03&#34;&gt;GitHub repository&lt;/a&gt;.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: Refactoring with Modules</title>
+				<link>/post/2024/03/04/aws-with-opentofu-refactoring-with-modules/</link>
+				<pubDate>Mon, 04 Mar 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/03/04/aws-with-opentofu-refactoring-with-modules/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;This tutorial builds on &lt;a href=&#34;https://richardpct.github.io/post/2024/02/20/getting-started-with-aws-and-opentofu/&#34;&gt;the previous one&lt;/a&gt; where we deployed a web server on AWS using OpenTofu. The infrastructure we built works, but all the resource definitions live directly in the stack directories. If we wanted to create a second environment (staging, production), we would have to copy-paste all that code — and as any developer knows, that&amp;rsquo;s a recipe for bugs and drift.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we refactor the code by introducing &lt;strong&gt;modules&lt;/strong&gt;. A module in OpenTofu works like a function in a programming language: it encapsulates a reusable piece of infrastructure and accepts parameters. You write it once, and call it as many times as you need with different values.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>Getting Started with AWS and OpenTofu</title>
+				<link>/post/2024/02/20/getting-started-with-aws-and-opentofu/</link>
+				<pubDate>Tue, 20 Feb 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/02/20/getting-started-with-aws-and-opentofu/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;I will show you how to build a simple AWS infrastructure using OpenTofu (an open-source Terraform alternative) for your first steps with Infrastructure as Code.&lt;/p&gt;&#xA;&lt;p&gt;The example I have chosen is based on &lt;a href=&#34;https://docs.aws.amazon.com/vpc/latest/userguide/get-started-ipv6.html&#34;&gt;the Getting Started with IPv6 for Amazon VPC&lt;/a&gt;. By the end of this tutorial, you will have created an EC2 instance running a web server, fully deployed and managed through code.&lt;/p&gt;&#xA;&lt;p&gt;The full source code is available on my &lt;a href=&#34;https://github.com/richardpct/aws-terraform-tuto01&#34;&gt;GitHub repository&lt;/a&gt;.&lt;/p&gt;</description>
+			</item>
+	</channel>
 </rss>

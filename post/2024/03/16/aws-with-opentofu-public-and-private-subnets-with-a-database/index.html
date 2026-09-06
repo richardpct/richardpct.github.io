@@ -253,41 +253,41 @@
 </span></span></code></pre></div><p>The private subnet&rsquo;s default route points to the NAT Gateway. This means instances in the private subnet can initiate outbound connections (to download packages, for example) but cannot receive incoming connections from the internet. The route tables for both subnets look like this:</p>
 <p><strong>Public subnet route table:</strong></p>
 <table>
-  <thead>
-      <tr>
-          <th>Destination</th>
-          <th>Target</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>10.0.0.0/16</td>
-          <td>local</td>
-      </tr>
-      <tr>
-          <td>0.0.0.0/0</td>
-          <td>Internet Gateway</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Destination</th>
+					<th>Target</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>10.0.0.0/16</td>
+					<td>local</td>
+			</tr>
+			<tr>
+					<td>0.0.0.0/0</td>
+					<td>Internet Gateway</td>
+			</tr>
+	</tbody>
 </table>
 <p><strong>Private subnet route table:</strong></p>
 <table>
-  <thead>
-      <tr>
-          <th>Destination</th>
-          <th>Target</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>10.0.0.0/16</td>
-          <td>local</td>
-      </tr>
-      <tr>
-          <td>0.0.0.0/0</td>
-          <td>NAT Gateway</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Destination</th>
+					<th>Target</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>10.0.0.0/16</td>
+					<td>local</td>
+			</tr>
+			<tr>
+					<td>0.0.0.0/0</td>
+					<td>NAT Gateway</td>
+			</tr>
+	</tbody>
 </table>
 <h2 id="security-group-rules">Security group rules</h2>
 <p>The security groups enforce strict communication rules between the webserver and the database. They are defined in <code>modules/network/sg.tf</code> because both groups need cross-references: the database ingress rule references the webserver&rsquo;s security group, and the webserver egress rule references the database&rsquo;s security group.</p>

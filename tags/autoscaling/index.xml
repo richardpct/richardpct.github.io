@@ -1,26 +1,31 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
-  <channel>
-    <title>Autoscaling on home</title>
-    <link>/tags/autoscaling/</link>
-    <description>Recent content in Autoscaling on home</description>
-    <generator>Hugo</generator>
-    <language>en-us</language>
-    <lastBuildDate>Tue, 23 Apr 2024 00:00:00 +0000</lastBuildDate>
-    <atom:link href="/tags/autoscaling/index.xml" rel="self" type="application/rss+xml" />
-    <item>
-      <title>AWS with OpenTofu: Auto Scaling Based on CPU Utilization</title>
-      <link>/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/</link>
-      <pubDate>Tue, 23 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;/post/2024/04/17/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/&#34;&gt;previous tutorial&lt;/a&gt;, we deployed two webservers behind an Application Load Balancer for zero-downtime failover. The ASG maintained exactly 2 instances at all times — no more, no less. But what happens when traffic spikes and your two servers can&amp;rsquo;t keep up?&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we add an &lt;strong&gt;auto scaling policy&lt;/strong&gt; so that the ASG can dynamically scale out from 2 to 3 webservers when the average CPU utilization crosses a threshold, and scale back in when the load drops. This is the difference between a fixed fleet and an elastic one — AWS automatically adjusts capacity to match demand.&lt;/p&gt;</description>
-    </item>
-    <item>
-      <title>AWS with OpenTofu: High Availability with Auto Scaling Groups</title>
-      <link>/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</link>
-      <pubDate>Fri, 05 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</guid>
-      <description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/&#34;&gt;previous tutorial&lt;/a&gt;, we secured our infrastructure with a bastion host. But there was still a weakness: if the bastion or the webserver crashed, they stayed down until someone manually intervened. In production, that&amp;rsquo;s not acceptable.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we introduce &lt;strong&gt;Auto Scaling Groups&lt;/strong&gt; (ASG) to make the bastion and webserver self-healing. If an instance fails or is terminated for any reason, the ASG automatically launches a replacement — your service experiences only a brief downtime rather than a full outage.&lt;/p&gt;</description>
-    </item>
-  </channel>
+	<channel>
+		<title>Autoscaling on home</title>
+		<link>/tags/autoscaling/</link>
+		<description>Recent content in Autoscaling on home</description>
+		<generator>Hugo</generator>
+		<language>en-us</language>
+		
+		
+		
+		
+			<lastBuildDate>Tue, 23 Apr 2024 00:00:00 +0000</lastBuildDate>
+		
+			<atom:link href="/tags/autoscaling/index.xml" rel="self" type="application/rss+xml" />
+			<item>
+				<title>AWS with OpenTofu: Auto Scaling Based on CPU Utilization</title>
+				<link>/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/</link>
+				<pubDate>Tue, 23 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/04/23/aws-with-opentofu-auto-scaling-based-on-cpu-utilization/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;/post/2024/04/17/aws-with-opentofu-load-balancing-with-alb-for-zero-downtime/&#34;&gt;previous tutorial&lt;/a&gt;, we deployed two webservers behind an Application Load Balancer for zero-downtime failover. The ASG maintained exactly 2 instances at all times — no more, no less. But what happens when traffic spikes and your two servers can&amp;rsquo;t keep up?&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we add an &lt;strong&gt;auto scaling policy&lt;/strong&gt; so that the ASG can dynamically scale out from 2 to 3 webservers when the average CPU utilization crosses a threshold, and scale back in when the load drops. This is the difference between a fixed fleet and an elastic one — AWS automatically adjusts capacity to match demand.&lt;/p&gt;</description>
+			</item>
+			<item>
+				<title>AWS with OpenTofu: High Availability with Auto Scaling Groups</title>
+				<link>/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</link>
+				<pubDate>Fri, 05 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/post/2024/04/05/aws-with-opentofu-high-availability-with-auto-scaling-groups/</guid>
+				<description>&lt;h2 id=&#34;purpose&#34;&gt;Purpose&lt;/h2&gt;&#xA;&lt;p&gt;In the &lt;a href=&#34;https://richardpct.github.io/post/2024/03/27/aws-with-opentofu-adding-a-bastion-host-for-secure-ssh-access/&#34;&gt;previous tutorial&lt;/a&gt;, we secured our infrastructure with a bastion host. But there was still a weakness: if the bastion or the webserver crashed, they stayed down until someone manually intervened. In production, that&amp;rsquo;s not acceptable.&lt;/p&gt;&#xA;&lt;p&gt;In this tutorial, we introduce &lt;strong&gt;Auto Scaling Groups&lt;/strong&gt; (ASG) to make the bastion and webserver self-healing. If an instance fails or is terminated for any reason, the ASG automatically launches a replacement — your service experiences only a brief downtime rather than a full outage.&lt;/p&gt;</description>
+			</item>
+	</channel>
 </rss>

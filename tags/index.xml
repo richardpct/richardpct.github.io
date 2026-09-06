@@ -1,152 +1,185 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
-  <channel>
-    <title>Tags on home</title>
-    <link>/tags/</link>
-    <description>Recent content in Tags on home</description>
-    <generator>Hugo</generator>
-    <language>en-us</language>
-    <lastBuildDate>Sun, 30 Mar 2025 00:00:00 +0000</lastBuildDate>
-    <atom:link href="/tags/index.xml" rel="self" type="application/rss+xml" />
-    <item>
-      <title>Aws</title>
-      <link>/tags/aws/</link>
-      <pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
-      <guid>/tags/aws/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Cilium</title>
-      <link>/tags/cilium/</link>
-      <pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
-      <guid>/tags/cilium/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Kubeadm</title>
-      <link>/tags/kubeadm/</link>
-      <pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
-      <guid>/tags/kubeadm/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Kubernetes</title>
-      <link>/tags/kubernetes/</link>
-      <pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
-      <guid>/tags/kubernetes/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Opentofu</title>
-      <link>/tags/opentofu/</link>
-      <pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
-      <guid>/tags/opentofu/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Rook-Ceph</title>
-      <link>/tags/rook-ceph/</link>
-      <pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
-      <guid>/tags/rook-ceph/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Terraform</title>
-      <link>/tags/terraform/</link>
-      <pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
-      <guid>/tags/terraform/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Ci-Cd</title>
-      <link>/tags/ci-cd/</link>
-      <pubDate>Mon, 03 Jun 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/ci-cd/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Gitlab</title>
-      <link>/tags/gitlab/</link>
-      <pubDate>Mon, 03 Jun 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/gitlab/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Autoscaling</title>
-      <link>/tags/autoscaling/</link>
-      <pubDate>Tue, 23 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/autoscaling/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Cloudwatch</title>
-      <link>/tags/cloudwatch/</link>
-      <pubDate>Tue, 23 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/cloudwatch/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Alb</title>
-      <link>/tags/alb/</link>
-      <pubDate>Wed, 17 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/alb/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>High-Availability</title>
-      <link>/tags/high-availability/</link>
-      <pubDate>Wed, 17 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/high-availability/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Load-Balancer</title>
-      <link>/tags/load-balancer/</link>
-      <pubDate>Wed, 17 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/load-balancer/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Elasticache</title>
-      <link>/tags/elasticache/</link>
-      <pubDate>Fri, 05 Apr 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/elasticache/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Bastion</title>
-      <link>/tags/bastion/</link>
-      <pubDate>Wed, 27 Mar 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/bastion/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Security</title>
-      <link>/tags/security/</link>
-      <pubDate>Wed, 27 Mar 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/security/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Redis</title>
-      <link>/tags/redis/</link>
-      <pubDate>Sat, 16 Mar 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/redis/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Vpc</title>
-      <link>/tags/vpc/</link>
-      <pubDate>Sat, 16 Mar 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/vpc/</guid>
-      <description></description>
-    </item>
-    <item>
-      <title>Modules</title>
-      <link>/tags/modules/</link>
-      <pubDate>Wed, 06 Mar 2024 00:00:00 +0000</pubDate>
-      <guid>/tags/modules/</guid>
-      <description></description>
-    </item>
-  </channel>
+	<channel>
+		<title>Tags on home</title>
+		<link>/tags/</link>
+		<description>Recent content in Tags on home</description>
+		<generator>Hugo</generator>
+		<language>en-us</language>
+		
+		
+		
+		
+			<lastBuildDate>Tue, 31 Mar 2026 00:00:00 +0000</lastBuildDate>
+		
+			<atom:link href="/tags/index.xml" rel="self" type="application/rss+xml" />
+			<item>
+				<title>Argocd</title>
+				<link>/tags/argocd/</link>
+				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
+				<guid>/tags/argocd/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Cilium</title>
+				<link>/tags/cilium/</link>
+				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
+				<guid>/tags/cilium/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Kubernetes</title>
+				<link>/tags/kubernetes/</link>
+				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
+				<guid>/tags/kubernetes/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Opentofu</title>
+				<link>/tags/opentofu/</link>
+				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
+				<guid>/tags/opentofu/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Proxmox</title>
+				<link>/tags/proxmox/</link>
+				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
+				<guid>/tags/proxmox/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Rancher</title>
+				<link>/tags/rancher/</link>
+				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
+				<guid>/tags/rancher/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Rke2</title>
+				<link>/tags/rke2/</link>
+				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
+				<guid>/tags/rke2/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Terraform</title>
+				<link>/tags/terraform/</link>
+				<pubDate>Tue, 31 Mar 2026 00:00:00 +0000</pubDate>
+				<guid>/tags/terraform/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Aws</title>
+				<link>/tags/aws/</link>
+				<pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
+				<guid>/tags/aws/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Kubeadm</title>
+				<link>/tags/kubeadm/</link>
+				<pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
+				<guid>/tags/kubeadm/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Rook-Ceph</title>
+				<link>/tags/rook-ceph/</link>
+				<pubDate>Sun, 30 Mar 2025 00:00:00 +0000</pubDate>
+				<guid>/tags/rook-ceph/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Ci-Cd</title>
+				<link>/tags/ci-cd/</link>
+				<pubDate>Mon, 03 Jun 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/ci-cd/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Gitlab</title>
+				<link>/tags/gitlab/</link>
+				<pubDate>Mon, 03 Jun 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/gitlab/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Autoscaling</title>
+				<link>/tags/autoscaling/</link>
+				<pubDate>Tue, 23 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/autoscaling/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Cloudwatch</title>
+				<link>/tags/cloudwatch/</link>
+				<pubDate>Tue, 23 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/cloudwatch/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Alb</title>
+				<link>/tags/alb/</link>
+				<pubDate>Wed, 17 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/alb/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>High-Availability</title>
+				<link>/tags/high-availability/</link>
+				<pubDate>Wed, 17 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/high-availability/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Load-Balancer</title>
+				<link>/tags/load-balancer/</link>
+				<pubDate>Wed, 17 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/load-balancer/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Elasticache</title>
+				<link>/tags/elasticache/</link>
+				<pubDate>Fri, 05 Apr 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/elasticache/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Bastion</title>
+				<link>/tags/bastion/</link>
+				<pubDate>Wed, 27 Mar 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/bastion/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Security</title>
+				<link>/tags/security/</link>
+				<pubDate>Wed, 27 Mar 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/security/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Redis</title>
+				<link>/tags/redis/</link>
+				<pubDate>Sat, 16 Mar 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/redis/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Vpc</title>
+				<link>/tags/vpc/</link>
+				<pubDate>Sat, 16 Mar 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/vpc/</guid>
+				<description></description>
+			</item>
+			<item>
+				<title>Modules</title>
+				<link>/tags/modules/</link>
+				<pubDate>Wed, 06 Mar 2024 00:00:00 +0000</pubDate>
+				<guid>/tags/modules/</guid>
+				<description></description>
+			</item>
+	</channel>
 </rss>

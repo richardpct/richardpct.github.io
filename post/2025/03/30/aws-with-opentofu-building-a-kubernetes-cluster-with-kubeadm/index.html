@@ -173,34 +173,34 @@
 <h2 id="network-design">Network design</h2>
 <p>The network has 3 subnet groups across 3 Availability Zones:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Subnet group</th>
-          <th>CIDR blocks</th>
-          <th>Contents</th>
-          <th>Internet access</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Public</td>
-          <td>10.0.7.0/24, 10.0.8.0/24, 10.0.9.0/24</td>
-          <td>Bastion, External NLB, NAT Gateways</td>
-          <td>Direct via IGW</td>
-      </tr>
-      <tr>
-          <td>Private</td>
-          <td>10.0.1.0/24, 10.0.2.0/24, 10.0.3.0/24</td>
-          <td>Control planes, Workers, Internal NLB</td>
-          <td>Outbound via NAT</td>
-      </tr>
-      <tr>
-          <td>Private EFS</td>
-          <td>10.0.4.0/24, 10.0.5.0/24, 10.0.6.0/24</td>
-          <td>EFS mount targets only</td>
-          <td>None</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Subnet group</th>
+					<th>CIDR blocks</th>
+					<th>Contents</th>
+					<th>Internet access</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Public</td>
+					<td>10.0.7.0/24, 10.0.8.0/24, 10.0.9.0/24</td>
+					<td>Bastion, External NLB, NAT Gateways</td>
+					<td>Direct via IGW</td>
+			</tr>
+			<tr>
+					<td>Private</td>
+					<td>10.0.1.0/24, 10.0.2.0/24, 10.0.3.0/24</td>
+					<td>Control planes, Workers, Internal NLB</td>
+					<td>Outbound via NAT</td>
+			</tr>
+			<tr>
+					<td>Private EFS</td>
+					<td>10.0.4.0/24, 10.0.5.0/24, 10.0.6.0/24</td>
+					<td>EFS mount targets only</td>
+					<td>None</td>
+			</tr>
+	</tbody>
 </table>
 <p>The EFS subnets are isolated from the NAT Gateway because EFS does not need internet access. One NAT Gateway is created per AZ to maintain availability if an AZ goes down.</p>
 <h2 id="two-load-balancers">Two load balancers</h2>
@@ -224,30 +224,30 @@
 <p>All 7 EC2 instances (1 bastion, 3 control planes, 3 workers) use <strong>spot instances</strong> instead of on-demand instances. Spot instances use spare AWS capacity at up to 90% discount, with the caveat that AWS can reclaim them with a 2-minute notice.</p>
 <p>Since we have 3 control planes and 3 workers across 3 AZs, the cluster tolerates losing individual instances — the ASG will replace them. The maximum spot prices are configured per instance type:</p>
 <table>
-  <thead>
-      <tr>
-          <th>Role</th>
-          <th>Instance type (AMD64)</th>
-          <th>Max spot price</th>
-      </tr>
-  </thead>
-  <tbody>
-      <tr>
-          <td>Bastion</td>
-          <td>t3.nano</td>
-          <td>$0.001/hr</td>
-      </tr>
-      <tr>
-          <td>Control Plane</td>
-          <td>t3.small</td>
-          <td>$0.010/hr</td>
-      </tr>
-      <tr>
-          <td>Worker</td>
-          <td>t3.medium</td>
-          <td>$0.020/hr</td>
-      </tr>
-  </tbody>
+	<thead>
+			<tr>
+					<th>Role</th>
+					<th>Instance type (AMD64)</th>
+					<th>Max spot price</th>
+			</tr>
+	</thead>
+	<tbody>
+			<tr>
+					<td>Bastion</td>
+					<td>t3.nano</td>
+					<td>$0.001/hr</td>
+			</tr>
+			<tr>
+					<td>Control Plane</td>
+					<td>t3.small</td>
+					<td>$0.010/hr</td>
+			</tr>
+			<tr>
+					<td>Worker</td>
+					<td>t3.medium</td>
+					<td>$0.020/hr</td>
+			</tr>
+	</tbody>
 </table>
 <p>The workers get a 20 GB root disk and an additional 15 GB EBS volume — this extra disk is used by Rook Ceph as an OSD (Object Storage Daemon) for providing persistent storage to the cluster.</p>
 <h2 id="efs-as-a-coordination-mechanism">EFS as a coordination mechanism</h2>
